@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nm -g \"/home/s/project/remote/tusb_hid/build/esp-idf/bt/libbt.a\")",
+      "Bash(nm -g \"/home/s/project/remote/tusb_hid/build/esp-idf/esp_hid/libesp_hid.a\")",
+      "WebSearch",
+      "Bash(gh api:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(python3:*)"
+    ]
+  }
+}
