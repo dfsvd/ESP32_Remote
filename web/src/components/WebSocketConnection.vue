@@ -3,17 +3,38 @@ import { ref, onMounted, onUnmounted } from 'vue';
 
 const isConnected = ref(false);
 const socket = ref(null);
-// const wsUrl = `ws://${window.location.hostname}/ws`; // Hardcoded URL
-const wsUrl = 'ws://192.168.4.1/ws';
 let reconnectTimer = null;
 
 const emit = defineEmits(['data', 'status', 'connected']);
 defineExpose({ sendData });
 
+function resolveWebSocketUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const overrideHost = params.get('ws') || window.localStorage.getItem('rc_ws_host');
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  if (overrideHost) {
+    const normalizedHost = overrideHost.replace(/^wss?:\/\//, '').replace(/\/ws$/, '');
+    return `${protocol}//${normalizedHost}/ws`;
+  }
+
+  const hostname = window.location.hostname;
+  const isLocalPreview =
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0';
+
+  if (isLocalPreview) {
+    return 'ws://192.168.4.1/ws';
+  }
+
+  const host = window.location.host || '192.168.4.1';
+  return `${protocol}//${host}/ws`;
+}
+
 function connect() {
   console.log('Connecting to WebSocket...');
   try {
-    socket.value = new WebSocket(wsUrl);
+    socket.value = new WebSocket(resolveWebSocketUrl());
 
     socket.value.onopen = () => {
       isConnected.value = true;

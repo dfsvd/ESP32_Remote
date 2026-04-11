@@ -4,16 +4,18 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 5174 --strictPort",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sync:esp32": "cp dist/index.html ../ESP32/components/RC/src/index.html",
+    "build:esp32": "vite build && cp dist/index.html ../ESP32/components/RC/src/index.html"
   },
   "dependencies": {
     "vue": "^3.5.30"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.5",
-    "vite": "^8.0.1",
+    "vite": "^8.0.8",
     "vite-plugin-singlefile": "^2.3.2"
   }
 }

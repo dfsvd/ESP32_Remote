@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdio.h>
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -13,11 +14,374 @@
 
 static const char *TAG = "RC_WIFI";
 static httpd_handle_t server = NULL;
+#define CRSF_STATUS_BUF_SIZE 256
+#define CRSF_MENU_BUF_SIZE   12288
 
 // 1. 本地的 16 通道测试数组 (出厂默认值)
 extern channel_cal_t limit[16] ;
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
+
+static void json_append_escaped(char *dst, size_t dst_size, size_t *offset, const char *src)
+{
+    if (!dst || !offset || dst_size == 0) {
+        return;
+    }
+
+    if (!src) {
+        src = "";
+    }
+
+    for (size_t i = 0; src[i] != '\0' && *offset + 1 < dst_size; ++i) {
+        unsigned char c = (unsigned char)src[i];
+        if (c == 0xC0) {
+            int written = snprintf(dst + *offset, dst_size - *offset, ":Lo");
+            if (written <= 0 || (size_t)written >= dst_size - *offset) break;
+            *offset += (size_t)written;
+            continue;
+        }
+        if (c == 0xC1) {
+            int written = snprintf(dst + *offset, dst_size - *offset, ":Hi");
+            if (written <= 0 || (size_t)written >= dst_size - *offset) break;
+            *offset += (size_t)written;
+            continue;
+        }
+        if (c == '"' || c == '\\') {
+            if (*offset + 2 >= dst_size) break;
+            dst[(*offset)++] = '\\';
+            dst[(*offset)++] = (char)c;
+            continue;
+        }
+        if (c == '\n') {
+            if (*offset + 2 >= dst_size) break;
+            dst[(*offset)++] = '\\';
+            dst[(*offset)++] = 'n';
+            continue;
+        }
+        if (c == '\r') {
+            if (*offset + 2 >= dst_size) break;
+            dst[(*offset)++] = '\\';
+            dst[(*offset)++] = 'r';
+            continue;
+        }
+        if (c == '\t') {
+            if (*offset + 2 >= dst_size) break;
+            dst[(*offset)++] = '\\';
+            dst[(*offset)++] = 't';
+            continue;
+        }
+        if (c < 32) {
+            continue;
+        }
+        if (c > 126) {
+            int written = snprintf(dst + *offset, dst_size - *offset, "\\u%04X", c);
+            if (written <= 0 || (size_t)written >= dst_size - *offset) break;
+            *offset += (size_t)written;
+            continue;
+        }
+        dst[(*offset)++] = (char)c;
+    }
+
+    dst[*offset] = '\0';
+}
+
+static size_t build_crsf_status_payload(char *buf, size_t buf_size)
+{
+    if (!buf || buf_size == 0) {
+        return 0;
+    }
+
+    crsf_state_t *state = crsf_get_state();
+    int written = snprintf(
+        buf,
+        buf_size,
+        "CRSF_STATUS:{\"is_ready\":%s,\"is_linked\":%s,\"rssi\":%u,\"lq\":%u,\"snr\":%d,"
+        "\"loaded_params\":%u,\"total_params\":%u,\"device_label\":\"",
+        state->is_ready ? "true" : "false",
+        state->is_linked ? "true" : "false",
+        state->rssi,
+        state->lq,
+        state->snr,
+        state->loaded_params,
+        state->total_params
+    );
+
+    if (written < 0 || (size_t)written >= buf_size) {
+        buf[0] = '\0';
+        return 0;
+    }
+
+    size_t offset = (size_t)written;
+    json_append_escaped(buf, buf_size, &offset, state->device_name[0] ? state->device_name : "ESP32 bridge");
+
+    if (offset + 4 >= buf_size) {
+        buf[0] = '\0';
+        return 0;
+    }
+
+    buf[offset++] = '"';
+    buf[offset++] = '}';
+    buf[offset++] = '\n';
+    buf[offset] = '\0';
+    return offset;
+}
+
+static size_t build_crsf_menu_payload(char *buf, size_t buf_size)
+{
+    if (!buf || buf_size == 0) {
+        return 0;
+    }
+
+    crsf_state_t *state = crsf_get_state();
+    size_t offset = 0;
+    int written = snprintf(buf, buf_size, "CRSF_MENU:[");
+    if (written < 0 || (size_t)written >= buf_size) {
+        return 0;
+    }
+    offset = (size_t)written;
+
+    bool first = true;
+    for (int i = 0; i < CRSF_MAX_MENU_ITEMS; ++i) {
+        crsf_menu_item_t *item = &state->menu[i];
+        if (item->id == 0 || !item->is_valid) {
+            continue;
+        }
+
+        written = snprintf(
+            buf + offset,
+            buf_size - offset,
+            "%s{\"id\":%u,\"parent_id\":%u,\"type\":%u,\"name\":\"",
+            first ? "" : ",",
+            item->id,
+            item->parent_id,
+            item->type
+        );
+        if (written < 0 || (size_t)written >= buf_size - offset) {
+            break;
+        }
+        offset += (size_t)written;
+        json_append_escaped(buf, buf_size, &offset, item->name);
+
+        written = snprintf(
+            buf + offset,
+            buf_size - offset,
+            "\",\"value\":%u,\"options\":\"",
+            item->value
+        );
+        if (written < 0 || (size_t)written >= buf_size - offset) {
+            break;
+        }
+        offset += (size_t)written;
+        json_append_escaped(buf, buf_size, &offset, item->options);
+
+        if (offset + 3 >= buf_size) {
+            break;
+        }
+        buf[offset++] = '"';
+        buf[offset++] = '}';
+        buf[offset] = '\0';
+        first = false;
+    }
+
+    if (offset + 3 >= buf_size) {
+        buf[0] = '\0';
+        return 0;
+    }
+
+    buf[offset++] = ']';
+    buf[offset++] = '\n';
+    buf[offset] = '\0';
+    return offset;
+}
+
+static bool crsf_status_needs_broadcast(
+    const crsf_state_t *state,
+    bool *last_ready,
+    bool *last_linked,
+    uint8_t *last_loaded_params,
+    uint8_t *last_total_params,
+    uint8_t *last_rssi,
+    uint8_t *last_lq,
+    int8_t *last_snr,
+    char *last_device_name,
+    size_t last_device_name_size)
+{
+    if (!state || !last_ready || !last_linked || !last_loaded_params || !last_total_params ||
+        !last_rssi || !last_lq || !last_snr || !last_device_name || last_device_name_size == 0) {
+        return false;
+    }
+
+    bool changed =
+        *last_ready != state->is_ready ||
+        *last_linked != state->is_linked ||
+        *last_loaded_params != state->loaded_params ||
+        *last_total_params != state->total_params ||
+        *last_rssi != state->rssi ||
+        *last_lq != state->lq ||
+        *last_snr != state->snr ||
+        strncmp(last_device_name, state->device_name, last_device_name_size) != 0;
+
+    if (!changed) {
+        return false;
+    }
+
+    *last_ready = state->is_ready;
+    *last_linked = state->is_linked;
+    *last_loaded_params = state->loaded_params;
+    *last_total_params = state->total_params;
+    *last_rssi = state->rssi;
+    *last_lq = state->lq;
+    *last_snr = state->snr;
+    strncpy(last_device_name, state->device_name, last_device_name_size - 1);
+    last_device_name[last_device_name_size - 1] = '\0';
+    return true;
+}
+
+static const crsf_menu_item_t *find_crsf_menu_item_by_id(const crsf_state_t *state, uint8_t param_id)
+{
+    if (!state || param_id == 0) {
+        return NULL;
+    }
+
+    for (int i = 0; i < CRSF_MAX_MENU_ITEMS; ++i) {
+        const crsf_menu_item_t *item = &state->menu[i];
+        if (item->id == param_id && item->is_valid) {
+            return item;
+        }
+    }
+
+    return NULL;
+}
+
+static const char *describe_crsf_option_label(
+    const crsf_menu_item_t *item,
+    uint8_t value,
+    char *buf,
+    size_t buf_size)
+{
+    if (!buf || buf_size == 0) {
+        return "";
+    }
+
+    buf[0] = '\0';
+
+    if (!item || item->options[0] == '\0') {
+        return buf;
+    }
+
+    const char *segment_start = item->options;
+    uint8_t option_index = 0;
+
+    for (const char *cursor = item->options; ; ++cursor) {
+        if (*cursor != ';' && *cursor != '\0') {
+            continue;
+        }
+
+        if (option_index == value) {
+            const char *trim_start = segment_start;
+            const char *trim_end = cursor;
+
+            while (trim_start < trim_end &&
+                   (*trim_start == ' ' || *trim_start == '\t' || *trim_start == '\r' || *trim_start == '\n')) {
+                ++trim_start;
+            }
+
+            while (trim_end > trim_start &&
+                   (trim_end[-1] == ' ' || trim_end[-1] == '\t' || trim_end[-1] == '\r' || trim_end[-1] == '\n')) {
+                --trim_end;
+            }
+
+            size_t copy_len = (size_t)(trim_end - trim_start);
+            if (copy_len >= buf_size) {
+                copy_len = buf_size - 1;
+            }
+            memcpy(buf, trim_start, copy_len);
+            buf[copy_len] = '\0';
+            return buf;
+        }
+
+        if (*cursor == '\0') {
+            break;
+        }
+
+        segment_start = cursor + 1;
+        ++option_index;
+    }
+
+    snprintf(buf, buf_size, "#%u", value);
+    return buf;
+}
+
+static void log_crsf_web_action(const char *action, uint8_t param_id, int value, bool has_value)
+{
+    crsf_state_t *state = crsf_get_state();
+    const crsf_menu_item_t *item = find_crsf_menu_item_by_id(state, param_id);
+    const char *name = (item && item->name[0] != '\0') ? item->name : "-";
+
+    if (!has_value) {
+        ESP_LOGI(TAG, "网页命令 %s: id=%u name=%s", action, param_id, name);
+        return;
+    }
+
+    char option_buf[96];
+    const char *option_label = describe_crsf_option_label(item, (uint8_t)value, option_buf, sizeof(option_buf));
+    if (option_label[0] != '\0') {
+        ESP_LOGI(TAG, "网页命令 %s: id=%u name=%s value=%d option=%s", action, param_id, name, value, option_label);
+        return;
+    }
+
+    ESP_LOGI(TAG, "网页命令 %s: id=%u name=%s value=%d", action, param_id, name, value);
+}
+
+static void ws_broadcast_text(const char *payload)
+{
+    if (!server || !payload || payload[0] == '\0') {
+        return;
+    }
+
+    httpd_ws_frame_t ws_pkt = {
+        .type = HTTPD_WS_TYPE_TEXT,
+        .payload = (uint8_t *)payload,
+        .len = strlen(payload),
+    };
+
+    size_t max_clients = 8;
+    int client_fds[8] = {0};
+    if (httpd_get_client_list(server, &max_clients, client_fds) != ESP_OK) {
+        return;
+    }
+
+    for (size_t i = 0; i < max_clients; ++i) {
+        if (httpd_ws_get_fd_info(server, client_fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+            httpd_ws_send_frame_async(server, client_fds[i], &ws_pkt);
+        }
+    }
+}
+
+static esp_err_t ws_send_text(httpd_req_t *req, const char *payload)
+{
+    if (!req || !payload || payload[0] == '\0') {
+        return ESP_OK;
+    }
+
+    httpd_ws_frame_t ws_pkt = {
+        .type = HTTPD_WS_TYPE_TEXT,
+        .payload = (uint8_t *)payload,
+        .len = strlen(payload),
+    };
+    return httpd_ws_send_frame(req, &ws_pkt);
+}
+
+static esp_err_t ws_send_crsf_snapshot(httpd_req_t *req)
+{
+    char status_buf[CRSF_STATUS_BUF_SIZE];
+    static char menu_buf[CRSF_MENU_BUF_SIZE];
+
+    build_crsf_status_payload(status_buf, sizeof(status_buf));
+    build_crsf_menu_payload(menu_buf, sizeof(menu_buf));
+    ws_send_text(req, status_buf);
+    return ws_send_text(req, menu_buf);
+}
 
 // =================================================================================
 // ⭐ NVS 存储功能 (必须写在被调用之前)
@@ -29,9 +393,9 @@ void save_settings_to_nvs(void) {
     if (err == ESP_OK) {
         esp_err_t err_cal = nvs_set_blob(my_handle, "cal_data", limit, sizeof(limit));
         esp_err_t err_mode = nvs_set_u8(my_handle, "sim_mode", (uint8_t)current_sim_mode);
-        esp_err_t err_power = nvs_set_u8(my_handle, "crsf_power", crsf_get_power());
+        
 
-        if (err_cal == ESP_OK && err_mode == ESP_OK && err_power == ESP_OK) {
+        if (err_cal == ESP_OK && err_mode == ESP_OK) {
             esp_err_t err_commit = nvs_commit(my_handle);
             if (err_commit == ESP_OK) {
                 ESP_LOGI(TAG, "💾 校准数据和模式已永久保存到 Flash (NVS)！");
@@ -39,8 +403,8 @@ void save_settings_to_nvs(void) {
                 ESP_LOGE(TAG, "❌ NVS commit 失败");
             }
         } else {
-            ESP_LOGE(TAG, "❌ 保存失败: cal=%s, mode=%s, power=%s",
-                     esp_err_to_name(err_cal), esp_err_to_name(err_mode), esp_err_to_name(err_power));
+            ESP_LOGE(TAG, "❌ 保存失败: cal=%s, mode=%s",
+                     esp_err_to_name(err_cal), esp_err_to_name(err_mode));
         }
 
         nvs_close(my_handle);
@@ -57,8 +421,7 @@ void load_settings_from_nvs() {
         size_t required_size = sizeof(limit);
         esp_err_t err_cal = nvs_get_blob(my_handle, "cal_data", limit, &required_size);
         esp_err_t err_mode = nvs_get_u8(my_handle, "sim_mode", (uint8_t*)&current_sim_mode);
-        uint8_t saved_power = CRSF_POWER_25MW;
-        esp_err_t err_power = nvs_get_u8(my_handle, "crsf_power", &saved_power);
+       
 
         if (err_cal == ESP_OK) {
             ESP_LOGI(TAG, "📂 从 Flash 成功加载校准数据！");
@@ -73,20 +436,8 @@ void load_settings_from_nvs() {
             ESP_LOGI(TAG, "🆕 未找到模式数据，使用默认 HID 模式。");
         }
 
-        if (err_power == ESP_OK) {
-            crsf_set_power(saved_power);
-            ESP_LOGI(TAG, "📂 从 Flash 成功加载 CRSF 功率: %u", saved_power);
-        } else {
-            crsf_set_power(CRSF_POWER_25MW);
-            ESP_LOGI(TAG, "🆕 未找到 CRSF 功率数据，使用默认值。");
-        }
-
         nvs_close(my_handle);
-    } else {
-        current_sim_mode = SIM_MODE_DEFAULT;
-        crsf_set_power(CRSF_POWER_25MW);
-        ESP_LOGI(TAG, "🆕 未找到保存数据，使用出厂默认值。");
-    }
+    } 
 }
 
 // =================================================================================
@@ -126,9 +477,10 @@ static esp_err_t ws_handler(httpd_req_t *req)
         ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
 
         if (ret == ESP_OK) {
+            char *text = (char *)ws_pkt.payload;
 
             // 1. 前端请求当前配置
-            if (strncmp((char*)ws_pkt.payload, "GET_CAL", 7) == 0) {
+            if (strncmp(text, "GET_CAL", 7) == 0) {
                 ESP_LOGI(TAG, "收到前端 GET_CAL 请求，正在下发模式和配置...");
 
                 // 先发模式
@@ -143,16 +495,8 @@ static esp_err_t ws_handler(httpd_req_t *req)
 
                 httpd_ws_send_frame(req, &mode_pkt);
 
-                char power_buf[16];
-                snprintf(power_buf, sizeof(power_buf), "P:%u\n", crsf_get_power());
-
-                httpd_ws_frame_t power_pkt;
-                memset(&power_pkt, 0, sizeof(power_pkt));
-                power_pkt.payload = (uint8_t*)power_buf;
-                power_pkt.len = strlen(power_buf);
-                power_pkt.type = HTTPD_WS_TYPE_TEXT;
-
-                httpd_ws_send_frame(req, &power_pkt);
+                
+               
 
                 // 再发校准
                 char cal_buf[512] = "C:";
@@ -184,12 +528,13 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 cal_pkt.type = HTTPD_WS_TYPE_TEXT;
 
                 httpd_ws_send_frame(req, &cal_pkt);
+                ws_send_crsf_snapshot(req);
                 ESP_LOGI(TAG, "模式和配置下发完毕！");
             }
 
             // 2. 前端保存模式
-            else if (strncmp((char*)ws_pkt.payload, "M:", 2) == 0) {
-                int mode = atoi((char*)ws_pkt.payload + 2);
+            else if (strncmp(text, "M:", 2) == 0) {
+                int mode = atoi(text + 2);
                 if (mode == SIM_MODE_DEFAULT || mode == SIM_MODE_XBOX) {
                     current_sim_mode = (sim_mode_t)mode;
                     save_settings_to_nvs();
@@ -198,25 +543,12 @@ static esp_err_t ws_handler(httpd_req_t *req)
                     ESP_LOGW(TAG, "收到非法模式值: %d", mode);
                 }
             }
-            else if (strncmp((char*)ws_pkt.payload, "P:", 2) == 0) {
-                int power = atoi((char*)ws_pkt.payload + 2);
-                if (power >= 0 && power < CRSF_POWER_COUNT) {
-                    crsf_set_power((uint8_t)power);
-                    save_settings_to_nvs();
-                    ESP_LOGI(TAG, "CRSF 功率已更新为: %d", power);
-                } else {
-                    ESP_LOGW(TAG, "收到非法功率值: %d", power);
-                }
-            }
-            else if (strncmp((char*)ws_pkt.payload, "BIND", 4) == 0) {
-                crsf_request_bind();
-                ESP_LOGI(TAG, "已请求 CRSF Bind");
-            }
+    
 
             // 3. 前端保存校准
-            else if (strncmp((char*)ws_pkt.payload, "C:", 2) == 0) {
+            else if (strncmp(text, "C:", 2) == 0) {
                 ESP_LOGI(TAG, "收到前端保存指令，开始更新内存...");
-                char *payload_data = (char*)ws_pkt.payload + 2;
+                char *payload_data = text + 2;
                 char *saveptr1;
                 char *channel_str = strtok_r(payload_data, ";", &saveptr1);
 
@@ -238,6 +570,44 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 ESP_LOGI(TAG, "正在重启设备...");
                 esp_restart();
             }
+            else if (strcmp(text, "CRSF_REFRESH") == 0) {
+                ESP_LOGI(TAG, "网页命令 refresh: 请求刷新 CRSF 菜单");
+                crsf_request_menu_reload();
+                ws_send_crsf_snapshot(req);
+                ESP_LOGI(TAG, "已响应 CRSF_REFRESH");
+            }
+            else if (strncmp(text, "CRSF_WRITE:", 11) == 0) {
+                int param_id = -1;
+                int new_value = -1;
+                if (sscanf(text + 11, "%d:%d", &param_id, &new_value) == 2 &&
+                    param_id > 0 && param_id <= CRSF_MAX_MENU_ITEMS &&
+                    new_value >= 0 && new_value <= 255) {
+                    log_crsf_web_action("write", (uint8_t)param_id, new_value, true);
+                    crsf_write_menu_value((uint8_t)param_id, (uint8_t)new_value);
+                } else {
+                    ESP_LOGW(TAG, "非法 CRSF_WRITE 指令: %s", text);
+                }
+            }
+            else if (strncmp(text, "CRSF_BIND:", 10) == 0) {
+                int param_id = -1;
+                if (sscanf(text + 10, "%d", &param_id) == 1 &&
+                    param_id > 0 && param_id <= CRSF_MAX_MENU_ITEMS) {
+                    log_crsf_web_action("bind", (uint8_t)param_id, 1, false);
+                    crsf_write_menu_value((uint8_t)param_id, 1);
+                } else {
+                    ESP_LOGW(TAG, "非法 CRSF_BIND 指令: %s", text);
+                }
+            }
+            else if (strncmp(text, "CRSF_COMMAND:", 13) == 0) {
+                int param_id = -1;
+                if (sscanf(text + 13, "%d", &param_id) == 1 &&
+                    param_id > 0 && param_id <= CRSF_MAX_MENU_ITEMS) {
+                    log_crsf_web_action("command", (uint8_t)param_id, 1, false);
+                    crsf_write_menu_value((uint8_t)param_id, 1);
+                } else {
+                    ESP_LOGW(TAG, "非法 CRSF_COMMAND 指令: %s", text);
+                }
+            }
         }
 
         free(buf);
@@ -248,82 +618,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
     return ret;
 }
 
-// static esp_err_t ws_handler(httpd_req_t *req)
-// {
-//     if (req->method == HTTP_GET) {
-//         ESP_LOGI(TAG, "WebSocket 握手成功");
-//         return ESP_OK;
-//     }
 
-//     httpd_ws_frame_t ws_pkt;
-//     uint8_t *buf = NULL;
-//     memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
-//     ws_pkt.type = HTTPD_WS_TYPE_TEXT;
-
-//     esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
-//     if (ret != ESP_OK) return ret;
-
-//     if (ws_pkt.len > 0) {
-//         buf = calloc(1, ws_pkt.len + 1);
-//         if (buf == NULL) return ESP_ERR_NO_MEM;
-        
-//         ws_pkt.payload = buf;
-//         ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
-        
-//         if (ret == ESP_OK) {
-            
-//             // ⭐ 分支 1：处理前端请求获取当前校准值 (GET_CAL)
-//             if (strncmp((char*)ws_pkt.payload, "GET_CAL", 7) == 0) {
-//                 ESP_LOGI(TAG, "收到前端 GET_CAL 请求，正在下发配置...");
-                
-//                 char cal_buf[512] = "C:"; 
-//                 int offset = 2; // 跳过 "C:"
-                
-//                 for (int i = 0; i < 16; i++) {
-//                     int written = snprintf(cal_buf + offset, sizeof(cal_buf) - offset, 
-//                                            "%d,%d,%d,%d%s", 
-//                                            i + 1, limit[i].raw_min, limit[i].raw_mid, limit[i].raw_max,
-//                                            (i == 15) ? "\n" : ";");
-//                     offset += written;
-//                 }
-
-//                 httpd_ws_frame_t out_pkt;
-//                 memset(&out_pkt, 0, sizeof(httpd_ws_frame_t));
-//                 out_pkt.payload = (uint8_t*)cal_buf;
-//                 out_pkt.len = strlen(cal_buf);
-//                 out_pkt.type = HTTPD_WS_TYPE_TEXT;
-                
-//                 httpd_ws_send_frame(req, &out_pkt);
-//                 ESP_LOGI(TAG, "配置下发完毕！");
-//             }
-            
-//             // ⭐ 分支 2：处理前端发来的保存指令 (C:)
-//             else if (strncmp((char*)ws_pkt.payload, "C:", 2) == 0) {
-//                 ESP_LOGI(TAG, "收到前端保存指令，开始更新内存...");
-//                 char *payload_data = (char*)ws_pkt.payload + 2;
-//                 char *saveptr1;
-//                 char *channel_str = strtok_r(payload_data, ";", &saveptr1);
-                
-//                 while (channel_str != NULL) {
-//                     int ch, min, mid, max;
-//                     if (sscanf(channel_str, "%d,%d,%d,%d", &ch, &min, &mid, &max) == 4) {
-//                         if (ch >= 1 && ch <= 16) {
-//                             limit[ch - 1].raw_min = min;
-//                             limit[ch - 1].raw_mid = mid;
-//                             limit[ch - 1].raw_max = max;
-//                         }
-//                     }
-//                     channel_str = strtok_r(NULL, ";", &saveptr1);
-//                 }
-                
-//                 // 内存更新完后，触发一次 Flash 保存动作！
-//                 save_settings_to_nvs();
-//             }
-//         }
-//         free(buf);
-//     }
-//     return ret;
-// }
 
 // =================================================================================
 // WebSocket 主动推送任务 (发送展开后的 16 个通道真实数据)
@@ -334,9 +629,18 @@ static void ws_broadcast_task(void *arg)
     fpv_joystick_report_t *joy = (fpv_joystick_report_t *)arg; 
     
     char send_buf[512]; 
+    char status_buf[CRSF_STATUS_BUF_SIZE];
     httpd_ws_frame_t ws_pkt;
     memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
     ws_pkt.type = HTTPD_WS_TYPE_TEXT;
+    bool last_crsf_ready = false;
+    bool last_crsf_linked = false;
+    uint8_t last_loaded_params = 0xFF;
+    uint8_t last_total_params = 0xFF;
+    uint8_t last_rssi = 0xFF;
+    uint8_t last_lq = 0xFF;
+    int8_t last_snr = 0x7F;
+    char last_device_name[64] = {0};
 
     while (1) {
         // 确保 server 开启，并且 joy 指针不为空
@@ -372,12 +676,34 @@ static void ws_broadcast_task(void *arg)
             ws_pkt.payload = (uint8_t*)send_buf;
             ws_pkt.len = strlen(send_buf);
 
-            size_t max_clients = 4;
-            int client_fds[4];
+            size_t max_clients = 8;
+            int client_fds[8] = {0};
             if (httpd_get_client_list(server, &max_clients, client_fds) == ESP_OK) {
                 for (int i = 0; i < max_clients; i++) {
-                    httpd_ws_send_frame_async(server, client_fds[i], &ws_pkt);
+                    if (httpd_ws_get_fd_info(server, client_fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+                        esp_err_t send_ret = httpd_ws_send_frame_async(server, client_fds[i], &ws_pkt);
+                        if (send_ret != ESP_OK) {
+                            ESP_LOGD(TAG, "跳过不可用的 WS 客户端 fd=%d ret=%s",
+                                     client_fds[i], esp_err_to_name(send_ret));
+                        }
+                    }
                 }
+            }
+
+            crsf_state_t *state = crsf_get_state();
+            if (crsf_status_needs_broadcast(
+                    state,
+                    &last_crsf_ready,
+                    &last_crsf_linked,
+                    &last_loaded_params,
+                    &last_total_params,
+                    &last_rssi,
+                    &last_lq,
+                    &last_snr,
+                    last_device_name,
+                    sizeof(last_device_name))) {
+                build_crsf_status_payload(status_buf, sizeof(status_buf));
+                ws_broadcast_text(status_buf);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(50)); // 20Hz 刷新率

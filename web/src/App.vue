@@ -1,109 +1,101 @@
 <script setup>
-import { ref, onMounted, onUnmounted, onUpdated, computed } from 'vue';
+import { computed, ref } from 'vue';
 import WebSocketConnection from './components/WebSocketConnection.vue';
 import Joystick from './components/Joystick.vue';
 import AuxChannelSlider from './components/AuxChannelSlider.vue';
+import CrsfConfiguratorPanel from './components/CrsfConfiguratorPanel.vue';
+import { mockCrsfMenus, mockCrsfStatus } from './mockCrsfState';
 
 const wsConnection = ref(null);
 const incomingDataBuffer = ref('');
-const sidebarScroller = ref(null);
-const showSidebarScrollbar = ref(false);
-const sidebarThumbHeight = ref(0);
-const sidebarThumbOffset = ref(0);
-let sidebarScrollbarFrame = 0;
+const isSocketConnected = ref(false);
+const activePage = ref('controls');
+
 const SIM_MODE_DEFAULT = 0;
 const SIM_MODE_XBOX = 1;
-const simMode = ref(SIM_MODE_DEFAULT);
 
-// 【修改1】：将 cal (校准数据) 放到全局 channels 状态中管理，保证绝对的响应式
-const channels = ref(Array.from({ length: 16 }, (_, i) => ({
-  id: i + 1,
-  mappedValue: 1500, // 新增：用来存 ESP32 发来的 1000~2000 映射值
-  rawValue: 2048,    // ESP32 发来的原始物理值
-  cal: { min: 1000, mid: 1500, max: 2000 } // 初始校准值
+const simMode = ref(SIM_MODE_DEFAULT);
+const crsfLoading = ref(false);
+const crsfStatus = ref({ ...mockCrsfStatus });
+const hasLiveCrsfData = ref(false);
+const autoCalibrationState = ref('idle');
+const autoCalibrationDraft = ref({});
+
+const channels = ref(Array.from({ length: 16 }, (_, index) => ({
+  id: index + 1,
+  mappedValue: 1500,
+  rawValue: 2048,
+  cal: { min: 1000, mid: 1500, max: 2000 },
 })));
 
-// --- FAKE DATA SIMULATION ---
-let dataSimulator = null;
-onMounted(() => {
-  // dataSimulator = setInterval(() => {
-  //   channels.value.forEach(ch => {
-  //     const movement = (Math.random() - 0.5) * 50;
-  //     let newValue = ch.rawValue + movement;
-  //     if (newValue < 1000) newValue = 1000;
-  //     if (newValue > 2000) newValue = 2000;
-  //     ch.rawValue = Math.round(newValue);
-  //   });
-  // }, 100);
-  window.addEventListener('resize', scheduleSidebarScrollbarUpdate);
-  scheduleSidebarScrollbarUpdate();
-});
-onUnmounted(() => {
-  if (dataSimulator) clearInterval(dataSimulator);
-  if (sidebarScrollbarFrame) {
-    cancelAnimationFrame(sidebarScrollbarFrame);
+const pages = [
+  {
+    id: 'controls',
+    label: 'RC 面板',
+    eyebrow: '控制台',
+    title: '摇杆、通道与校准',
+  },
+  {
+    id: 'crsf',
+    label: 'CRSF 菜单',
+    eyebrow: '参数配置',
+    title: '接收机配置与命令入口',
+  },
+];
+
+const menuNameTranslations = {
+  'Packet Rate': '发包速率',
+  'Telem Ratio': '回传比例',
+  'Switch Mode': '开关模式',
+  'Link Mode': '链路模式',
+  'Model Match': '模型匹配',
+  'TX Power (100mW)': '发射功率（100mW）',
+  'Max Power': '最大发射功率',
+  Dynamic: '动态功率',
+  'VTX Administrator': '图传设置',
+  Band: '频段',
+  Channel: '频道',
+  'Pwr Lvl': '功率等级',
+  Pitmode: '陷波模式',
+  'Send VTx': '发送图传设置',
+  'WiFi Connectivity': 'WiFi 连接',
+  'Enable WiFi': '开启 WiFi',
+  'Enable Rx WiFi': '开启接收机 WiFi',
+  Bind: '对频',
+  'Bad/Good': '坏包/好包',
+  'Root Menu': '根菜单',
+};
+
+function translateMenuName(name) {
+  if (!name) {
+    return name;
   }
-  window.removeEventListener('resize', scheduleSidebarScrollbarUpdate);
-});
-onUpdated(() => {
-  scheduleSidebarScrollbarUpdate();
-});
-// --- END FAKE DATA ---
-
-const sidebarThumbStyle = computed(() => ({
-  height: `${sidebarThumbHeight.value}px`,
-  transform: `translateY(${sidebarThumbOffset.value}px)`,
-}));
-const isXboxMode = computed(() => simMode.value === SIM_MODE_XBOX);
-
-function updateSidebarScrollbar() {
-  const element = sidebarScroller.value;
-  if (!element) {
-    return;
-  }
-
-  const hasOverflow = element.scrollHeight > element.clientHeight + 1;
-  showSidebarScrollbar.value = hasOverflow;
-
-  if (!hasOverflow) {
-    sidebarThumbHeight.value = 0;
-    sidebarThumbOffset.value = 0;
-    return;
-  }
-
-  const thumbHeight = Math.max(
-    (element.clientHeight / element.scrollHeight) * element.clientHeight,
-    36,
-  );
-  const maxScrollTop = element.scrollHeight - element.clientHeight;
-  const maxThumbOffset = element.clientHeight - thumbHeight;
-  const thumbOffset =
-    maxScrollTop > 0 ? (element.scrollTop / maxScrollTop) * maxThumbOffset : 0;
-
-  sidebarThumbHeight.value = thumbHeight;
-  sidebarThumbOffset.value = thumbOffset;
+  return menuNameTranslations[name] ?? name;
 }
 
-function scheduleSidebarScrollbarUpdate() {
-  if (sidebarScrollbarFrame) {
-    cancelAnimationFrame(sidebarScrollbarFrame);
-  }
-
-  sidebarScrollbarFrame = requestAnimationFrame(() => {
-    sidebarScrollbarFrame = 0;
-    updateSidebarScrollbar();
-  });
+function normalizeCrsfMenuItem(item) {
+  return {
+    id: Number(item.id),
+    parentId: Number(item.parentId ?? item.parent_id ?? 0),
+    type: item.type ?? item.kind ?? 0,
+    name: translateMenuName(item.name ?? `项目 ${item.id}`),
+    value: Number.isFinite(Number(item.value)) ? Number(item.value) : 0,
+    options: item.options ?? item.content ?? '',
+  };
 }
+
+const crsfMenus = ref(mockCrsfMenus.map(normalizeCrsfMenuItem));
 
 function applyCalibrationLine(line) {
   const entries = line.slice(2).split(';');
   entries.forEach(entry => {
-    const [id, min, mid, max] = entry.split(',').map(v => parseInt(v.trim(), 10));
-    const ch = channels.value.find(c => c.id === id);
-    if (ch && !isNaN(min) && !isNaN(mid) && !isNaN(max)) {
-      ch.cal.min = min;
-      ch.cal.mid = mid;
-      ch.cal.max = max;
+    const [id, min, mid, max] = entry.split(',').map(value => parseInt(value.trim(), 10));
+    const channel = channels.value.find(item => item.id === id);
+
+    if (channel && !Number.isNaN(min) && !Number.isNaN(mid) && !Number.isNaN(max)) {
+      channel.cal.min = min;
+      channel.cal.mid = mid;
+      channel.cal.max = max;
     }
   });
 }
@@ -134,41 +126,168 @@ function applyRealtimeLine(line) {
     return;
   }
 
-  channelStrings.forEach((chStr, index) => {
+  channelStrings.forEach((channelString, index) => {
     const channel = channels.value[index];
     if (!channel) {
       return;
     }
 
-    const parts = chStr.split(':');
+    const parts = channelString.split(':');
     if (parts.length === 2) {
-      const mappedVal = parseInt(parts[0].trim(), 10);
-      const rawVal = parseInt(parts[1].trim(), 10);
+      const mappedValue = parseInt(parts[0].trim(), 10);
+      const rawValue = parseInt(parts[1].trim(), 10);
 
-      if (!isNaN(mappedVal) && !isNaN(rawVal)) {
-        channel.mappedValue = mappedVal;
-        channel.rawValue = rawVal;
+      if (!Number.isNaN(mappedValue) && !Number.isNaN(rawValue)) {
+        channel.mappedValue = mappedValue;
+        channel.rawValue = rawValue;
       }
       return;
     }
 
-    const rawVal = parseInt(chStr, 10);
-    if (!isNaN(rawVal)) {
-      channel.rawValue = rawVal;
-
-      // 兼容后 12 个通道只上报单值的情况。
-      if (rawVal >= 800 && rawVal <= 2200) {
-        channel.mappedValue = rawVal;
+    const rawValue = parseInt(channelString, 10);
+    if (!Number.isNaN(rawValue)) {
+      channel.rawValue = rawValue;
+      if (rawValue >= 800 && rawValue <= 2200) {
+        channel.mappedValue = rawValue;
       }
     }
   });
+
+  trackAutoCalibration();
+}
+
+function createAutoCalibrationSeed() {
+  return Object.fromEntries(
+    channels.value.slice(0, 4).map(channel => [
+      channel.id,
+      {
+        min: channel.rawValue,
+        max: channel.rawValue,
+        current: channel.rawValue,
+      },
+    ])
+  );
+}
+
+function startAutoCalibration() {
+  autoCalibrationDraft.value = createAutoCalibrationSeed();
+  autoCalibrationState.value = 'capturing';
+}
+
+function cancelAutoCalibration() {
+  autoCalibrationDraft.value = {};
+  autoCalibrationState.value = 'idle';
+}
+
+function trackAutoCalibration() {
+  if (autoCalibrationState.value !== 'capturing') {
+    return;
+  }
+
+  const nextDraft = { ...autoCalibrationDraft.value };
+  channels.value.slice(0, 4).forEach(channel => {
+    const existing = nextDraft[channel.id] ?? {
+      min: channel.rawValue,
+      max: channel.rawValue,
+      current: channel.rawValue,
+    };
+
+    nextDraft[channel.id] = {
+      min: Math.min(existing.min, channel.rawValue),
+      max: Math.max(existing.max, channel.rawValue),
+      current: channel.rawValue,
+    };
+  });
+
+  autoCalibrationDraft.value = nextDraft;
+}
+
+function finishAutoCalibration() {
+  if (autoCalibrationState.value !== 'capturing') {
+    return;
+  }
+
+  channels.value.slice(0, 4).forEach(channel => {
+    const draft = autoCalibrationDraft.value[channel.id];
+    if (!draft) {
+      return;
+    }
+
+    const nextMin = Math.min(draft.min, draft.max);
+    const nextMax = Math.max(draft.min, draft.max);
+    const nextMid = Math.min(Math.max(channel.rawValue, nextMin), nextMax);
+
+    channel.cal.min = nextMin;
+    channel.cal.mid = nextMid;
+    channel.cal.max = nextMax;
+  });
+
+  autoCalibrationState.value = 'idle';
+  window.alert('自动校准结果已写入 CH1-CH4，请点“保存校准”同步到设备。');
+}
+
+function applyCrsfSnapshot(snapshot) {
+  if (snapshot.status) {
+    crsfStatus.value = {
+      ...crsfStatus.value,
+      isReady: snapshot.status.isReady ?? snapshot.status.is_ready ?? crsfStatus.value.isReady,
+      isLinked: snapshot.status.isLinked ?? snapshot.status.is_linked ?? crsfStatus.value.isLinked,
+      rssi: snapshot.status.rssi ?? crsfStatus.value.rssi,
+      lq: snapshot.status.lq ?? crsfStatus.value.lq,
+      loadedParams: snapshot.status.loadedParams ?? snapshot.status.loaded_params ?? crsfStatus.value.loadedParams,
+      totalParams: snapshot.status.totalParams ?? snapshot.status.total_params ?? crsfStatus.value.totalParams,
+      deviceLabel: snapshot.status.deviceLabel ?? snapshot.status.device_label ?? 'ESP32 live data',
+    };
+  }
+
+  if (Array.isArray(snapshot.menus)) {
+    crsfMenus.value = snapshot.menus
+      .map(normalizeCrsfMenuItem)
+      .filter(item => Number.isFinite(item.id) && item.id > 0);
+  }
+
+  hasLiveCrsfData.value = true;
+  crsfLoading.value = false;
+}
+
+function tryApplyCrsfPacket(line) {
+  try {
+    if (line.startsWith('{') && line.endsWith('}')) {
+      const payload = JSON.parse(line);
+      if (payload.type === 'crsf_snapshot') {
+        applyCrsfSnapshot(payload);
+        return true;
+      }
+      if (payload.type === 'crsf_status') {
+        applyCrsfSnapshot({ status: payload.status ?? payload });
+        return true;
+      }
+      if (payload.type === 'crsf_menu') {
+        applyCrsfSnapshot({ menus: payload.menus ?? [] });
+        return true;
+      }
+    }
+
+    if (line.startsWith('CRSF_SNAPSHOT:')) {
+      applyCrsfSnapshot(JSON.parse(line.slice('CRSF_SNAPSHOT:'.length)));
+      return true;
+    }
+    if (line.startsWith('CRSF_STATUS:')) {
+      applyCrsfSnapshot({ status: JSON.parse(line.slice('CRSF_STATUS:'.length)) });
+      return true;
+    }
+    if (line.startsWith('CRSF_MENU:')) {
+      applyCrsfSnapshot({ menus: JSON.parse(line.slice('CRSF_MENU:'.length)) });
+      return true;
+    }
+  } catch (error) {
+    console.warn('Failed to parse CRSF payload:', error, line);
+  }
+
+  return false;
 }
 
 function handleWebSocketData(data) {
-  if (dataSimulator) {
-    clearInterval(dataSimulator);
-    dataSimulator = null;
-  }
   incomingDataBuffer.value += data;
 
   const lines = incomingDataBuffer.value.split(/\r?\n/);
@@ -178,6 +297,10 @@ function handleWebSocketData(data) {
     .map(line => line.trim())
     .filter(Boolean)
     .forEach(line => {
+      if (tryApplyCrsfPacket(line)) {
+        return;
+      }
+
       if (line.startsWith('C:')) {
         applyCalibrationLine(line);
         return;
@@ -191,20 +314,54 @@ function handleWebSocketData(data) {
     });
 }
 
-function sendCalibrationData() {
+function handleSocketStatus(connected) {
+  isSocketConnected.value = connected;
+}
+
+function sendBridgeMessage(payload) {
   if (!wsConnection.value) {
-    alert("未连接到设备，无法保存！");
-    return;
+    return false;
   }
 
-  wsConnection.value.sendData(`M:${simMode.value}`);
+  if (typeof payload === 'string') {
+    wsConnection.value.sendData(payload);
+    return true;
+  }
 
-  const calibrationString = channels.value
-    .map(ch => `${ch.id},${ch.cal.min},${ch.cal.mid},${ch.cal.max}`)
-    .join(';');
-  const command = `C:${calibrationString}`;
-  wsConnection.value.sendData(command);
-  alert(`已发送模式和校准数据`);
+  wsConnection.value.sendData(JSON.stringify(payload));
+  return true;
+}
+
+function clearCrsfLoadingSoon() {
+  window.setTimeout(() => {
+    crsfLoading.value = false;
+  }, 600);
+}
+
+function handleCrsfRefresh() {
+  crsfLoading.value = true;
+  sendBridgeMessage('CRSF_REFRESH');
+  clearCrsfLoadingSoon();
+}
+
+function handleCrsfBind(item) {
+  crsfLoading.value = true;
+  sendBridgeMessage(`CRSF_BIND:${item.id}`);
+  clearCrsfLoadingSoon();
+}
+
+function handleCrsfCommand(item) {
+  crsfLoading.value = true;
+  sendBridgeMessage(`CRSF_COMMAND:${item.id}`);
+  clearCrsfLoadingSoon();
+}
+
+function handleCrsfSelectChange(payload) {
+  crsfMenus.value = crsfMenus.value.map(item =>
+    item.id === payload.id ? { ...item, value: payload.value } : item
+  );
+
+  sendBridgeMessage(`CRSF_WRITE:${payload.id}:${payload.value}`);
 }
 
 function requestCalibration() {
@@ -213,400 +370,886 @@ function requestCalibration() {
   }
 }
 
+function handleSocketConnected() {
+  requestCalibration();
+}
+
+function sendCalibrationData() {
+  if (!wsConnection.value) {
+    window.alert('未连接到设备，无法保存。');
+    return;
+  }
+
+  wsConnection.value.sendData(`M:${simMode.value}`);
+
+  const calibrationString = channels.value
+    .map(channel => `${channel.id},${channel.cal.min},${channel.cal.mid},${channel.cal.max}`)
+    .join(';');
+
+  wsConnection.value.sendData(`C:${calibrationString}`);
+  window.alert('模式与校准数据已发送。');
+}
+
 function setSimMode(nextMode) {
   simMode.value = nextMode;
 }
 
-// 摇杆控制计算：直接用 ESP32 发过来的 1000~2000 的 mappedValue 转成 -100~100 的百分比
-const rightStick = computed(() => {
-  return { 
-    x: (channels.value[0].mappedValue - 1500) / 5, // CH1: 横滚 Roll (左右)
-    y: (channels.value[1].mappedValue - 1500) / 5  // CH2: 俯仰 Pitch (上下)
+const currentPage = computed(() => pages.find(page => page.id === activePage.value) ?? pages[0]);
+const isXboxMode = computed(() => simMode.value === SIM_MODE_XBOX);
+
+const leftStick = computed(() => ({
+  x: (channels.value[3].mappedValue - 1500) / 5,
+  y: (channels.value[2].mappedValue - 1500) / 5,
+}));
+
+const rightStick = computed(() => ({
+  x: (channels.value[0].mappedValue - 1500) / 5,
+  y: (channels.value[1].mappedValue - 1500) / 5,
+}));
+
+const primaryChannels = computed(() => channels.value.slice(0, 4));
+
+const channelExtremes = computed(() => {
+  const mappedValues = channels.value.map(channel => channel.mappedValue);
+  return {
+    min: Math.min(...mappedValues),
+    max: Math.max(...mappedValues),
   };
 });
 
-const leftStick = computed(() => {
-  return { 
-    x: (channels.value[3].mappedValue - 1500) / 5, // CH4: 偏航 Yaw (左右)
-    y: (channels.value[2].mappedValue - 1500) / 5  // CH3: 油门 Throttle (上下)
-  };
+const liveChannelCount = computed(
+  () => channels.value.filter(channel => channel.mappedValue !== 1500 || channel.rawValue !== 2048).length
+);
+const autoCalibrationChannels = computed(() =>
+  channels.value.slice(0, 4).map(channel => ({
+    id: channel.id,
+    label: `CH${channel.id}`,
+    rawValue: channel.rawValue,
+    min: autoCalibrationDraft.value[channel.id]?.min ?? channel.rawValue,
+    max: autoCalibrationDraft.value[channel.id]?.max ?? channel.rawValue,
+  }))
+);
+const isAutoCalibrationActive = computed(() => autoCalibrationState.value === 'capturing');
+
+const crsfPanelDescription = computed(() => {
+  return '';
 });
 
+const calibrationHeadline = computed(() => {
+  return `${liveChannelCount.value}/16 通道已在活动`;
+});
+
+const pageStatusCards = computed(() => [
+  {
+    label: '连接',
+    value: isSocketConnected.value ? '在线' : '离线',
+    accent: isSocketConnected.value,
+  },
+  {
+    label: '模式',
+    value: isXboxMode.value ? 'XBOX' : 'HID',
+    accent: true,
+  },
+  {
+    label: 'CRSF',
+    value: `${crsfStatus.value.loadedParams ?? 0}/${crsfStatus.value.totalParams ?? 0}`,
+    accent: Boolean(crsfStatus.value.isReady),
+  },
+]);
 </script>
 
 <template>
-  <div id="app-grid">
-    <header class="app-header">
-      <div class="mode-switch-panel">
-        <div class="mode-switch-group">
-          <button
-            type="button"
-            class="mode-switch-button"
-            :class="{ active: !isXboxMode }"
-            @click="setSimMode(SIM_MODE_DEFAULT)"
-          >
-            HID
-          </button>
-          <button
-            type="button"
-            class="mode-switch-button"
-            :class="{ active: isXboxMode }"
-            @click="setSimMode(SIM_MODE_XBOX)"
-          >
-            XBOX
-          </button>
-        </div>
-      </div>
-      <a
-        class="brand-title"
-        href="https://darwinfpv.com/"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        DARWIN
-      </a>
-      <button @click="sendCalibrationData" class="save-button">保存</button>
-    </header>
-
+  <div class="app-shell">
     <aside class="app-sidebar">
-      <h4>通道校准</h4>
-      <div class="sidebar-scroll-shell">
-        <div
-          ref="sidebarScroller"
-          class="sidebar-content-wrapper"
-          @scroll="updateSidebarScrollbar"
-          @click.capture="scheduleSidebarScrollbarUpdate"
+      <nav class="sidebar-nav" aria-label="Primary">
+        <button
+          v-for="page in pages"
+          :key="page.id"
+          type="button"
+          class="nav-link"
+          :class="{ active: activePage === page.id }"
+          @click="activePage = page.id"
         >
-          <AuxChannelSlider
-            v-for="ch in channels"
-            :key="ch.id"
-            :channel-id="ch.id"
-            :mapped-value="ch.mappedValue"
-            v-model:raw-value="ch.rawValue"
-            :cal="ch.cal" 
-          />
-        </div>
-        <div v-if="showSidebarScrollbar" class="sidebar-scrollbar" aria-hidden="true">
-          <div class="sidebar-scrollbar-thumb" :style="sidebarThumbStyle"></div>
-        </div>
+          <span class="nav-label">{{ page.label }}</span>
+        </button>
+      </nav>
+
+      <section class="sidebar-summary">
+        <article
+          v-for="card in pageStatusCards"
+          :key="card.label"
+          class="summary-card"
+          :class="{ accent: card.accent }"
+        >
+          <span>{{ card.label }}</span>
+          <strong>{{ card.value }}</strong>
+        </article>
+      </section>
+
+      <div class="sidebar-actions">
+        <button type="button" class="primary-action" @click="sendCalibrationData">
+          保存校准
+        </button>
+        <button type="button" class="secondary-action" @click="handleCrsfRefresh">
+          刷新 CRSF
+        </button>
       </div>
     </aside>
 
-    <footer class="app-footer">
-      <Joystick :x="leftStick.x" :y="leftStick.y" label="左摇杆" />
-      <Joystick :x="rightStick.x" :y="rightStick.y" label="右摇杆" />
-    </footer>
+    <main class="app-main">
+      <section v-if="activePage === 'controls'" class="controls-page">
+        <section class="hero-card">
+          <div class="hero-actions controls-toolbar">
+            <div class="mode-switch-group toolbar-block">
+              <button
+                type="button"
+                class="mode-switch-button"
+                :class="{ active: !isXboxMode }"
+                @click="setSimMode(SIM_MODE_DEFAULT)"
+              >
+                HID
+              </button>
+              <button
+                type="button"
+                class="mode-switch-button"
+                :class="{ active: isXboxMode }"
+                @click="setSimMode(SIM_MODE_XBOX)"
+              >
+                XBOX
+              </button>
+            </div>
 
-    <WebSocketConnection 
-      ref="wsConnection" 
+            <div class="hero-metrics">
+              <article class="metric-card">
+                <span>实时状态</span>
+                <strong>{{ calibrationHeadline }}</strong>
+                <small>{{ channelExtremes.min }} ~ {{ channelExtremes.max }}</small>
+              </article>
+              <article class="metric-card">
+                <span>链路快照</span>
+                <strong>{{ crsfStatus.isLinked ? '已链路' : '未链路' }}</strong>
+                <small>RSSI {{ crsfStatus.rssi ?? '--' }} · LQ {{ crsfStatus.lq ?? '--' }}</small>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="joystick-section">
+          <article class="panel-card sticks-card">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Stick View</p>
+                <h3>双摇杆预览</h3>
+              </div>
+              <small>CH1-CH4</small>
+            </div>
+
+            <div class="stick-grid">
+              <Joystick :x="leftStick.x" :y="leftStick.y" label="左摇杆" />
+              <Joystick :x="rightStick.x" :y="rightStick.y" label="右摇杆" />
+            </div>
+          </article>
+
+          <article class="panel-card primary-card">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">Primary Channels</p>
+                <h3>主通道概览</h3>
+              </div>
+              <small>Roll / Pitch / Throttle / Yaw</small>
+            </div>
+
+            <div class="primary-grid">
+              <div v-for="channel in primaryChannels" :key="channel.id" class="primary-tile">
+                <span>CH{{ channel.id }}</span>
+                <strong>{{ channel.mappedValue }}</strong>
+                <small>RAW {{ channel.rawValue }}</small>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="panel-card calibration-panel">
+          <div class="panel-head">
+            <div>
+              <p class="panel-kicker">Channel Calibration</p>
+              <h3>16 通道校准面板</h3>
+            </div>
+          </div>
+
+          <section class="auto-calibration-card">
+            <div class="auto-calibration-copy">
+              <strong>主通道自动校准</strong>
+            </div>
+
+            <div class="auto-calibration-actions">
+              <button
+                v-if="!isAutoCalibrationActive"
+                type="button"
+                class="secondary-action compact-action"
+                @click="startAutoCalibration"
+              >
+                开始自动校准
+              </button>
+              <button
+                v-else
+                type="button"
+                class="primary-action compact-action"
+                @click="finishAutoCalibration"
+              >
+                回中完成并写入
+              </button>
+              <button
+                v-if="isAutoCalibrationActive"
+                type="button"
+                class="secondary-action compact-action"
+                @click="cancelAutoCalibration"
+              >
+                取消
+              </button>
+            </div>
+
+            <div class="auto-calibration-grid">
+              <article
+                v-for="channel in autoCalibrationChannels"
+                :key="channel.id"
+                class="auto-calibration-tile"
+              >
+                <span>{{ channel.label }}</span>
+                <strong>{{ channel.rawValue }}</strong>
+                <small>Min {{ channel.min }} · Max {{ channel.max }}</small>
+              </article>
+            </div>
+          </section>
+
+          <div class="channel-grid">
+            <AuxChannelSlider
+              v-for="channel in channels"
+              :key="channel.id"
+              :channel-id="channel.id"
+              :mapped-value="channel.mappedValue"
+              v-model:raw-value="channel.rawValue"
+              :cal="channel.cal"
+            />
+          </div>
+        </section>
+      </section>
+
+      <section v-else class="crsf-page">
+        <CrsfConfiguratorPanel
+          :menus="crsfMenus"
+          :status="crsfStatus"
+          :loading="crsfLoading"
+          :description="crsfPanelDescription"
+          @refresh="handleCrsfRefresh"
+          @bind="handleCrsfBind"
+          @command="handleCrsfCommand"
+          @select-change="handleCrsfSelectChange"
+        />
+      </section>
+    </main>
+
+    <WebSocketConnection
+      ref="wsConnection"
       @data="handleWebSocketData"
-      @connected="requestCalibration"
+      @status="handleSocketStatus"
+      @connected="handleSocketConnected"
     />
   </div>
 </template>
 
 <style>
-/* * ==================================
-  * FORCEFUL GLOBAL & APP OVERRIDES
-  * ==================================
-*/
 :root {
-  --bg-color: #1e1e1e;
-  --panel-bg-color: #242424;
-  --border-color: #333;
-  --text-color: #f0f0f5;
-  --text-secondary-color: #a0a0a5;
-  --header-height: 60px;
-  --accent-color: #00bfff;
-  --glow-color: rgba(0, 191, 255, 0.5);
+  --app-bg: #efe8dc;
+  --app-ink: #1e2628;
+  --app-muted: #6c7673;
+  --app-border: rgba(30, 38, 40, 0.1);
+  --app-panel: rgba(255, 252, 247, 0.9);
+  --app-panel-strong: #fffdf8;
+  --app-accent: #0d7f77;
+  --app-accent-strong: #0a6660;
+  --app-accent-soft: rgba(13, 127, 119, 0.12);
+  --app-warm: #c57a34;
+  --text-color: var(--app-ink);
+  --text-secondary-color: var(--app-muted);
+  --border-color: var(--app-border);
+  --accent-color: var(--app-accent);
+  --glow-color: rgba(13, 127, 119, 0.18);
+  --panel-bg-color: var(--app-panel);
+  --channel-card-bg: rgba(255, 251, 245, 0.92);
+  --channel-card-border: rgba(30, 38, 40, 0.08);
+  --input-bg: #f7f1e8;
+  --joystick-surface:
+    radial-gradient(circle at 30% 30%, rgba(13, 127, 119, 0.14), transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(242, 235, 224, 0.98));
 }
 
-html, body {
-  margin: 0 !important;
-  padding: 0 !important;
-  width: 100vw !important;
-  height: 100dvh !important;
-  overflow: hidden !important;
-  background-color: var(--bg-color);
-  color: var(--text-color);
-  font-family: 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(13, 127, 119, 0.16), transparent 28%),
+    radial-gradient(circle at right center, rgba(197, 122, 52, 0.1), transparent 24%),
+    linear-gradient(180deg, #faf6ef 0%, var(--app-bg) 100%);
+  color: var(--app-ink);
+  font-family: 'Avenir Next', 'Trebuchet MS', 'PingFang SC', sans-serif;
+}
+
+body {
+  overflow-x: hidden;
 }
 
 #app {
-  max-width: none !important;
-  width: 100vw !important;
-  height: 100dvh !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: none !important;
+  width: 100vw;
+  min-height: 100dvh;
+  max-width: none;
+  margin: 0;
+  padding: 0;
 }
 
-#app-grid {
-  display: grid;
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.app-shell {
   width: 100%;
-  height: 100dvh;
-  box-sizing: border-box;
-  grid-template-columns: 1fr 400px;
-  grid-template-rows: var(--header-height) minmax(0, 1fr);
-  grid-template-areas:
-    "header sidebar"
-    "joysticks sidebar";
-  overflow: hidden;
-}
-
-.app-header { 
-  grid-area: header; 
+  min-height: 100dvh;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center; 
-  gap: 1rem;
-  padding: 0 2rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  grid-template-columns: 280px minmax(0, 1fr);
 }
 
-.brand-title {
-  grid-column: 2;
-  justify-self: center;
-  display: inline-flex;
-  align-items: center;
-  font-size: 1.15rem;
+.app-sidebar {
+  position: sticky;
+  top: 0;
+  display: grid;
+  align-content: start;
+  gap: 24px;
+  min-height: 100dvh;
+  padding: 28px 22px;
+  box-sizing: border-box;
+  border-right: 1px solid rgba(30, 38, 40, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 252, 248, 0.94), rgba(245, 237, 226, 0.96));
+  backdrop-filter: blur(14px);
+}
+
+.hero-card h3,
+.panel-head h3 {
+  margin: 0;
+  font-family: 'Georgia', 'Times New Roman', serif;
   font-weight: 700;
-  letter-spacing: 0.22rem;
-  color: var(--text-color);
+  letter-spacing: 0.01em;
+}
+
+.sidebar-kicker,
+.hero-kicker,
+.panel-kicker {
+  margin: 0 0 8px;
+  color: var(--app-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  white-space: nowrap;
-  text-decoration: none;
-  transition: color 0.25s ease, text-shadow 0.25s ease;
 }
 
-.brand-title:hover {
-  color: var(--accent-color);
-  text-shadow: 0 0 12px rgba(0, 191, 255, 0.28);
+.hero-copy p,
+.summary-card small,
+.metric-card small {
+  color: var(--app-muted);
+  line-height: 1.65;
 }
 
-.mode-switch-panel {
-  justify-self: start;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
+.sidebar-nav {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.nav-link {
+  display: grid;
+  place-items: center;
+  gap: 0;
+  padding: 14px 16px;
+  text-align: center;
+  border: 1px solid rgba(30, 38, 40, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 251, 245, 0.8);
+  color: var(--app-ink);
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.nav-link:hover {
+  transform: translateY(-1px);
+  border-color: rgba(13, 127, 119, 0.22);
+}
+
+.nav-link.active {
+  border-color: rgba(13, 127, 119, 0.28);
+  background: linear-gradient(180deg, rgba(13, 127, 119, 0.12), rgba(255, 251, 245, 0.96));
+  box-shadow: 0 18px 32px rgba(13, 127, 119, 0.12);
+}
+
+.nav-label {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.sidebar-summary,
+.sidebar-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.summary-card {
+  display: grid;
+  gap: 2px;
+  padding: 14px 16px;
+  border: 1px solid rgba(30, 38, 40, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 253, 248, 0.78);
+}
+
+.summary-card span {
+  color: var(--app-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.summary-card strong {
+  font-size: 1.05rem;
+}
+
+.summary-card.accent {
+  border-color: rgba(13, 127, 119, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(13, 127, 119, 0.05);
+}
+
+.primary-action,
+.secondary-action {
+  width: 100%;
+  padding: 13px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.primary-action {
+  border: none;
+  background: linear-gradient(135deg, var(--app-accent), var(--app-accent-strong));
+  color: #f7fffe;
+  box-shadow: 0 18px 36px rgba(13, 127, 119, 0.22);
+}
+
+.secondary-action {
+  border: 1px solid rgba(30, 38, 40, 0.1);
+  background: rgba(255, 251, 245, 0.85);
+  color: var(--app-ink);
+}
+
+.primary-action:hover,
+.secondary-action:hover,
+.mode-switch-button:hover {
+  transform: translateY(-1px);
+}
+
+.app-main {
+  display: grid;
+  align-content: start;
+  gap: 24px;
+  padding: 28px;
+  box-sizing: border-box;
   min-width: 0;
+}
+
+.topbar,
+.hero-card,
+.panel-card {
+  border: 1px solid var(--app-border);
+  border-radius: 28px;
+  background: var(--app-panel);
+  box-shadow: 0 24px 60px rgba(49, 58, 63, 0.08);
+}
+
+.controls-page,
+.crsf-page {
+  display: grid;
+  gap: 22px;
+}
+
+.hero-card {
+  display: block;
+  padding: 18px 20px;
+  background:
+    radial-gradient(circle at top left, rgba(13, 127, 119, 0.14), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(197, 122, 52, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 239, 228, 0.94));
+}
+
+.hero-actions,
+.hero-metrics {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.hero-actions {
+  min-width: 0;
+}
+
+.controls-toolbar {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  flex-wrap: nowrap;
 }
 
 .mode-switch-group {
   display: inline-flex;
-  padding: 0.2rem;
-  border: 1px solid rgba(0, 191, 255, 0.28);
+  padding: 4px;
+  border: 1px solid rgba(13, 127, 119, 0.14);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .mode-switch-button {
-  min-width: 64px;
-  padding: 0.45rem 0.9rem;
+  min-width: 92px;
+  padding: 11px 16px;
   border: none;
   border-radius: 999px;
   background: transparent;
-  color: var(--text-secondary-color);
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.04rem;
+  color: var(--app-muted);
   cursor: pointer;
-  transition: all 0.25s ease;
+  font-weight: 700;
 }
 
 .mode-switch-button.active {
-  background: var(--accent-color);
-  color: var(--bg-color);
-  box-shadow: 0 0 12px rgba(0, 191, 255, 0.28);
+  background: linear-gradient(135deg, var(--app-accent), var(--app-accent-strong));
+  color: #faffff;
+  box-shadow: 0 12px 26px rgba(13, 127, 119, 0.22);
 }
 
-.app-footer {
-  grid-area: joysticks;
+.metric-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 18px;
+  border: 1px solid rgba(30, 38, 40, 0.08);
+  border-radius: 20px;
+  background: rgba(255, 253, 248, 0.82);
+}
+
+.metric-card small {
+  line-height: 1.3;
+}
+
+.metric-card span {
+  color: var(--app-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.metric-card strong {
+  font-size: 1.15rem;
+}
+
+.hero-metrics {
+  flex: 1 1 auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.joystick-section {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: 22px;
+}
+
+.panel-card {
+  padding: 24px;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.panel-head small {
+  color: var(--app-muted);
+}
+
+.stick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  justify-items: center;
+}
+
+.primary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.primary-tile {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid rgba(30, 38, 40, 0.08);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(246, 239, 228, 0.84));
+}
+
+.primary-tile span,
+.primary-tile small {
+  color: var(--app-muted);
+}
+
+.primary-tile strong {
+  font-size: 1.4rem;
+}
+
+.channel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.auto-calibration-card {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid rgba(13, 127, 119, 0.14);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(13, 127, 119, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 239, 228, 0.92));
+}
+
+.auto-calibration-copy {
+  display: grid;
+  gap: 0;
+}
+
+.auto-calibration-copy strong {
+  font-size: 1.05rem;
+}
+
+.auto-calibration-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  align-content: center;
-  gap: 200px;
-  padding: 1.5rem;
-  min-height: 0;
-  overflow: hidden;
-  background-image: radial-gradient(circle, #2a2a2a, #1a1a1a);
+  gap: 10px;
 }
 
-.app-sidebar { 
-  grid-area: sidebar; 
-  background: var(--panel-bg-color); 
-  padding: 1.5rem; 
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
-  box-sizing: border-box;
-  border-left: 1px solid var(--border-color) !important;
+.compact-action {
+  width: auto;
+  min-width: 160px;
+  padding: 11px 18px;
 }
 
-h4 {
-  text-align: center;
-  margin-top: 0;
-  margin-bottom: 1.5rem;
-  color: var(--text-secondary-color);
-  padding-bottom: 1rem;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border-color);
+.auto-calibration-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.sidebar-scroll-shell {
-  position: relative;
-  flex: 1;
-  min-height: 0;
+.auto-calibration-tile {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid rgba(30, 38, 40, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 253, 248, 0.88);
 }
 
-.sidebar-content-wrapper {
-  height: 100%;
-  flex-grow: 1;
-  min-height: 0;
-  overflow-y: scroll;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding-right: 18px;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--accent-color) transparent;
-}
-.sidebar-content-wrapper::-webkit-scrollbar { width: 8px; }
-.sidebar-content-wrapper::-webkit-scrollbar-track { background: transparent; }
-.sidebar-content-wrapper::-webkit-scrollbar-thumb {
-  background-color: var(--accent-color);
-  border-radius: 4px;
+.auto-calibration-tile span,
+.auto-calibration-tile small {
+  color: var(--app-muted);
 }
 
-.sidebar-scrollbar {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 8px;
-  height: 100%;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  pointer-events: none;
+.auto-calibration-tile strong {
+  font-size: 1.2rem;
 }
 
-.sidebar-scrollbar-thumb {
-  width: 100%;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #61d9ff 0%, var(--accent-color) 100%);
-  box-shadow: 0 0 10px rgba(0, 191, 255, 0.35);
-}
-
-.save-button {
-  grid-column: 3;
-  justify-self: end;
-  background-color: transparent;
-  color: var(--accent-color);
-  border: 1px solid var(--accent-color);
-  padding: 0.6rem 1.2rem;
-  border-radius: 6px;
-  font-size: 1rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.3s;
-  box-shadow: 0 0 5px var(--glow-color);
-}
-.save-button:hover {
-  background-color: var(--accent-color);
-  color: var(--bg-color);
-  box-shadow: 0 0 15px var(--glow-color);
-}
-
-@media (max-width: 1024px) {
-  #app-grid {
-    grid-template-columns: minmax(0, 1fr) 360px;
-  }
-
-  .app-footer {
-    gap: 96px;
-    padding: 1.25rem;
+@media (max-width: 1180px) {
+  .app-shell {
+    grid-template-columns: 1fr;
   }
 
   .app-sidebar {
-    padding: 1.25rem;
+    position: static;
+    min-height: auto;
+    border-right: none;
+    border-bottom: 1px solid rgba(30, 38, 40, 0.08);
+  }
+
+  .sidebar-nav,
+  .sidebar-summary,
+  .sidebar-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .controls-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .hero-metrics {
+    width: 100%;
+  }
+
+  .joystick-section,
+  .channel-grid {
+    grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 768px) {
-  #app-grid {
+@media (max-width: 780px) {
+  .app-main,
+  .app-sidebar {
+    padding: 18px;
+  }
+
+  .hero-card,
+  .panel-card {
+    border-radius: 22px;
+  }
+
+  .hero-card,
+  .panel-head {
+    display: grid;
+  }
+
+  .sidebar-nav,
+  .channel-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto minmax(0, 1fr);
-    grid-template-areas:
-      "header"
-      "joysticks"
-      "sidebar";
   }
 
-  .app-header {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    padding: 0.9rem 1rem;
-    background: rgba(30, 30, 30, 0.96);
-    backdrop-filter: blur(10px);
+  .sidebar-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .brand-title {
+  .sidebar-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .summary-card {
+    gap: 4px;
+    padding: 10px 8px;
+    border-radius: 16px;
+    text-align: center;
+  }
+
+  .summary-card span {
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+  }
+
+  .summary-card strong {
     font-size: 1rem;
-    letter-spacing: 0.16rem;
+    line-height: 1.1;
   }
 
-  .mode-switch-panel {
-    gap: 0.3rem;
+  .sidebar-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .primary-action,
+  .secondary-action {
+    padding: 12px 10px;
+    font-size: 0.96rem;
+    font-weight: 700;
+  }
+
+  .controls-toolbar,
+  .hero-metrics {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .controls-toolbar {
+    display: grid;
+    justify-items: center;
+  }
+
+  .hero-actions,
+  .hero-metrics {
+    min-width: 0;
   }
 
   .mode-switch-group {
-    padding: 0.16rem;
+    justify-self: center;
   }
 
-  .mode-switch-button {
-    min-width: 52px;
-    padding: 0.38rem 0.62rem;
-    font-size: 0.72rem;
+  .stick-grid,
+  .primary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
   }
 
-  .save-button {
-    padding: 0.55rem 0.9rem;
-    font-size: 0.95rem;
+  .panel-head {
+    gap: 10px;
+    margin-bottom: 16px;
+    width: 100%;
+    justify-items: center;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
   }
 
-  .app-footer {
-    gap: 1.5rem;
-    padding: 1.25rem 1rem 0.75rem;
-    min-height: 220px;
+  .panel-head > div {
+    display: grid;
+    justify-items: center;
+    align-items: center;
+    width: 100%;
+    margin: 0 auto;
   }
 
+  .panel-head small {
+    display: block;
+    width: 100%;
+    margin: 0 auto;
+    text-align: center;
+  }
+}
+
+@media (max-width: 520px) {
+  .app-main,
   .app-sidebar {
-    border-left: none !important;
-    border-top: 1px solid var(--border-color) !important;
-    padding: 1rem;
-    height: 100%;
+    padding: 14px;
   }
 
-  .sidebar-content-wrapper {
-    padding-right: 0.4rem;
-    -webkit-overflow-scrolling: touch;
+  .nav-link {
+    padding: 13px 12px;
+    border-radius: 16px;
   }
 
-  .sidebar-scrollbar {
-    width: 6px;
+  .nav-label {
+    font-size: 0.96rem;
   }
 
-  h4 {
-    margin-bottom: 1rem;
-    padding-bottom: 0.75rem;
+  .auto-calibration-card {
+    padding: 14px;
+    border-radius: 18px;
+  }
+
+  .auto-calibration-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .compact-action {
+    width: 100%;
+    min-width: 0;
   }
 }
 </style>

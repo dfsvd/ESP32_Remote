@@ -97,17 +97,19 @@ function toggleMax() { maxSet.value = !maxSet.value; if (maxSet.value) props.cal
 
 <style scoped>
 .aux-channel {
-  background: var(--panel-bg-color, #2c2c2e);
-  border-radius: 8px;
-  padding: 0.5rem 1rem;
+  background: var(--channel-card-bg, #2c2c2e);
+  border: 1px solid var(--channel-card-border, rgba(255, 255, 255, 0.08));
+  border-radius: 18px;
+  padding: 0.7rem 0.95rem;
   width: 100%;
-  max-width: 320px;
+  max-width: none;
   box-sizing: border-box;
+  box-shadow: 0 14px 28px rgba(24, 33, 38, 0.06);
 }
 .main-display {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.85rem;
 }
 .channel-label {
   font-weight: bold;
@@ -122,7 +124,7 @@ function toggleMax() { maxSet.value = !maxSet.value; if (maxSet.value) props.cal
   appearance: none;
   width: 100%;
   height: 10px;
-  background: #1a1a1a;
+  background: linear-gradient(90deg, rgba(13, 127, 119, 0.1), rgba(197, 122, 52, 0.16));
   border-radius: 5px;
   border: 1px solid var(--border-color, #444);
   outline: none;
@@ -186,15 +188,15 @@ function toggleMax() { maxSet.value = !maxSet.value; if (maxSet.value) props.cal
 input[type="number"] {
   width: 100%;
   padding: 0.25rem;
-  background-color: #333;
-  border: 1px solid #555;
+  background-color: var(--input-bg, #333);
+  border: 1px solid var(--border-color, #555);
   color: var(--text-color, #f0f0f5);
-  border-radius: 4px;
+  border-radius: 10px;
 }
 button {
   padding: 0.25rem 0.5rem;
   background-color: var(--accent-color, #00bfff);
-  color: #1a1a1a;
+  color: #f5fffe;
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -225,7 +227,7 @@ button:disabled {
 .toggle-switch {
   width: 36px;
   height: 20px;
-  background: #555;
+  background: rgba(108, 118, 115, 0.5);
   border-radius: 10px;
   position: relative;
   cursor: pointer;
@@ -250,7 +252,7 @@ button:disabled {
 }
 .raw-value { 
   text-align: center; 
-  color: #aaa; 
+  color: var(--text-secondary-color, #aaa); 
   font-size: 0.9rem;
   font-family: monospace;
 }
@@ -263,7 +265,7 @@ button:disabled {
   width: 100%;
   min-width: 0;
   height: 8px;
-  background: #333;
+  background: linear-gradient(90deg, rgba(13, 127, 119, 0.16), rgba(197, 122, 52, 0.16));
   outline: none;
   border-radius: 4px;
   transition: opacity .2s;

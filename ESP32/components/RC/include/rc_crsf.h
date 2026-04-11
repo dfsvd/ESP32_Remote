@@ -1,66 +1,49 @@
 #pragma once
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#include <stdbool.h>
 #include <stdint.h>
-#include "rc_read.h"
-#include "driver/gpio.h"
+#include <stdbool.h>
 #include "driver/uart.h"
 
-// CRSF 使用独立 UART 外设发送到外置高频头。
-#define CRSF_UART_PORT       UART_NUM_1
-#define CRSF_UART_BAUD_RATE  420000
+#define CRSF_MAX_MENU_ITEMS 30
 
-// 传输模式选择：
-// - CRSF_LINK_MODE_UART_FULL_DUPLEX: 传统双线 UART，TX/RX 分开接线。
-// - CRSF_LINK_MODE_UART_HALF_DUPLEX: 单线半双工，TX/RX 复用同一根 CRSF 信号线。
-typedef enum {
-    CRSF_LINK_MODE_UART_FULL_DUPLEX = 0,
-    CRSF_LINK_MODE_UART_HALF_DUPLEX = 1,
-} crsf_link_mode_t;
+// 菜单项结构体
+typedef struct {
+    uint8_t id;
+    uint8_t parent_id;
+    uint8_t type;
+    char name[64];
+    char options[256];   // SELECT 选项，INFO/STRING/COMMAND 等文本型参数也复用此缓冲
+    uint8_t value;
+    bool is_valid;       // 标记是否已完整加载
+    uint8_t _raw_data[384]; // 🔥 扩容：从 192 增加到 384
+} crsf_menu_item_t;
 
-// 默认保持当前双线模式，避免影响现有硬件接法。
-#define CRSF_LINK_MODE      CRSF_LINK_MODE_UART_FULL_DUPLEX
+// 全局状态机
+typedef struct {
+    bool is_ready;
+    bool is_linked;
+    uint8_t rssi;
+    uint8_t lq;
+    int8_t  snr;
+    char device_name[64];
+    uint8_t total_params;
+    uint8_t loaded_params;
+    crsf_menu_item_t menu[CRSF_MAX_MENU_ITEMS];
+    bool trigger_bind;
+} crsf_state_t;
 
-// 双线模式下使用的独立 TX / RX 引脚。
-#define CRSF_UART_TX_PIN     GPIO_NUM_21
-#define CRSF_UART_RX_PIN     GPIO_NUM_20
+typedef struct {
+    uart_port_t uart_port;
+    uint32_t baud_rate;
+    int tx_pin;
+    int rx_pin;
+    int task_priority;
+    int task_core_id;
+    void (*on_device_info_cb)(const char *name);
+} crsf_config_t;
 
-// 单线模式下使用的共享 CRSF 信号引脚。
-// 切到 CRSF_LINK_MODE_UART_HALF_DUPLEX 时，把高频头的 CRSF 信号线接到这个 GPIO。
-#define CRSF_UART_HALF_DUPLEX_PIN GPIO_NUM_21
-
-#define CRSF_UART_RTS_PIN    UART_PIN_NO_CHANGE
-#define CRSF_UART_CTS_PIN    UART_PIN_NO_CHANGE
-
-#define CRSF_TASK_STACK_SIZE 4096
-#define CRSF_TASK_PRIORITY   5
-#define CRSF_TASK_PERIOD_MS  4
-#define CRSF_TASK_CORE_ID    tskNO_AFFINITY
-
-typedef enum {
-    CRSF_POWER_10MW = 0,
-    CRSF_POWER_25MW,
-    CRSF_POWER_100MW,
-    CRSF_POWER_250MW,
-    CRSF_POWER_500MW,
-    CRSF_POWER_1000MW,
-    CRSF_POWER_COUNT
-} crsf_power_t;
-
-// 启动 CRSF 发送任务。通道数据复用现有 joy 结构体。
-void crsf_init(fpv_joystick_report_t *joy);
-
-// 设置/获取当前功率档位，功率值会通过现有网页和 NVS 流程持久化。
-void crsf_set_power(uint8_t power_index);
-uint8_t crsf_get_power(void);
-
-// 请求发送一次 Bind 指令。Bind 是动作，不是持久状态。
-void crsf_request_bind(void);
-bool crsf_consume_bind_request(void);
-
-#ifdef __cplusplus
-}
-#endif
+void crsf_init(const crsf_config_t *config);
+crsf_state_t* crsf_get_state(void);
+void crsf_set_channel(uint8_t channel_idx, uint16_t value_us);
+void crsf_write_menu_value(uint8_t param_id, uint8_t new_value);
+void crsf_send_device_ping(void);
+void crsf_request_menu_reload(void);

@@ -1,0 +1,32 @@
+export const mockCrsfStatus = {
+  isReady: true,
+  isLinked: false,
+  rssi: -91,
+  lq: 100,
+  loadedParams: 20,
+  totalParams: 20,
+  deviceLabel: "Mock preview until WebSocket is wired",
+};
+
+export const mockCrsfMenus = [
+  { id: 1, parentId: 0, type: 0x09, name: "Packet Rate", value: 3, options: "50Hz(-115dBm);100Hz Full(-112dBm);150Hz(-112dBm);250Hz(-108dBm);333Hz Full(-105dBm);500Hz(-105dBm);D250(-104dBm);D500(-104dBm);F500(-104dBm)" },
+  { id: 2, parentId: 0, type: 0x09, name: "Telem Ratio", value: 0, options: "Std;Off;1:128;1:64;1:32;1:16;1:8;1:4;1:2;Race" },
+  { id: 3, parentId: 0, type: 0x09, name: "Switch Mode", value: 0, options: "Wide;Hybrid" },
+  { id: 4, parentId: 0, type: 0x09, name: "Link Mode", value: 0, options: "Normal;MAVLink" },
+  { id: 5, parentId: 0, type: 0x09, name: "Model Match", value: 0, options: "Off;On" },
+  { id: 6, parentId: 0, type: 0x0b, name: "TX Power (100mW)", value: 0, options: "" },
+  { id: 7, parentId: 6, type: 0x09, name: "Max Power", value: 1, options: "10;100" },
+  { id: 8, parentId: 6, type: 0x09, name: "Dynamic", value: 0, options: "Off;Dyn;AUX9;AUX10;AUX11;AUX12" },
+  { id: 9, parentId: 0, type: 0x0b, name: "VTX Administrator", value: 0, options: "" },
+  { id: 10, parentId: 9, type: 0x09, name: "Band", value: 0, options: "Off;A;B;E;F;R;L" },
+  { id: 11, parentId: 9, type: 0x00, name: "Channel", value: 0, options: "1-8" },
+  { id: 12, parentId: 9, type: 0x09, name: "Pwr Lvl", value: 0, options: "-;1;2;3;4;5;6;7;8" },
+  { id: 13, parentId: 9, type: 0x09, name: "Pitmode", value: 0, options: "Off;On;AUX1:Lo;AUX1:Hi;AUX2:Lo;AUX2:Hi;AUX3:Lo;AUX3:Hi;AUX4:Lo;AUX4:Hi;AUX5:Lo;AUX5:Hi" },
+  { id: 14, parentId: 9, type: 0x0d, name: "Send VTx", value: 0, options: "" },
+  { id: 15, parentId: 0, type: 0x0b, name: "WiFi Connectivity", value: 0, options: "" },
+  { id: 16, parentId: 15, type: 0x0d, name: "Enable WiFi", value: 0, options: "" },
+  { id: 17, parentId: 15, type: 0x0d, name: "Enable Rx WiFi", value: 0, options: "" },
+  { id: 18, parentId: 0, type: 0x0d, name: "Bind", value: 0, options: "" },
+  { id: 19, parentId: 0, type: 0x0c, name: "Bad/Good", value: 0, options: "0/1" },
+  { id: 20, parentId: 0, type: 0x0c, name: "ver.unknown ISM2G4", value: 0, options: "40555e" },
+];

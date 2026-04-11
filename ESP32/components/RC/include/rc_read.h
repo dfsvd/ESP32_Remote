@@ -62,20 +62,24 @@ typedef struct {
     
 } fpv_joystick_report_t;
 
-#define ADC_roll        ADC_CHANNEL_6
-#define ADC_pitch       ADC_CHANNEL_5
-#define ADC_throttle    ADC_CHANNEL_3
-#define ADC_yaw         ADC_CHANNEL_4
+#define ADC_roll        ADC_CHANNEL_5
+#define ADC_pitch       ADC_CHANNEL_6
+#define ADC_throttle    ADC_CHANNEL_4
+#define ADC_yaw         ADC_CHANNEL_3
 // #define ADC_aux1        ADC_CHANNEL_0
 // #define ADC_aux2        ADC_CHANNEL_1
 // #define ADC_aux3        ADC_CHANNEL_2
 // #define ADC_aux4        ADC_CHANNEL_3
 
-//下面使用这里要添加
-#define GPIO_SW         (1ULL << GPIO_NUM_16)| (1ULL << GPIO_NUM_17)| (1ULL << GPIO_NUM_18)   
+// 开关引脚统一提成宏，避免和 CRSF/UART 占用冲突
+#define RC_SWITCH_2POS_PIN       GPIO_NUM_38
+#define RC_SWITCH_3POS_UP_PIN    GPIO_NUM_39
+#define RC_SWITCH_3POS_DOWN_PIN  GPIO_NUM_40
 
-#define READ_KEY_CH1    read_2pos_switch(GPIO_NUM_16,true)
-#define READ_KEY_CH2    read_3pos_switch(GPIO_NUM_17,GPIO_NUM_18)
+#define GPIO_SW         ((1ULL << RC_SWITCH_2POS_PIN) | (1ULL << RC_SWITCH_3POS_UP_PIN) | (1ULL << RC_SWITCH_3POS_DOWN_PIN))
+
+#define READ_KEY_CH1    read_2pos_switch(RC_SWITCH_2POS_PIN, true)
+#define READ_KEY_CH2    read_3pos_switch(RC_SWITCH_3POS_UP_PIN, RC_SWITCH_3POS_DOWN_PIN)
 #define READ_KEY_CH3    1500
 #define READ_KEY_CH4    1500
 #define READ_KEY_CH5    1500

@@ -64,23 +64,32 @@ const stickStyle = computed(() => {
   height: var(--joystick-base-size);
   border: 2px solid var(--border-color, #444);
   border-radius: 50%;
-  background-color: rgba(0,0,0,0.2);
+  background: var(--joystick-surface, rgba(0, 0, 0, 0.2));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 18px 36px rgba(24, 33, 38, 0.08);
 }
 
 .joystick-stick {
   position: absolute;
   width: var(--joystick-stick-size);
   height: var(--joystick-stick-size);
-  background-color: var(--accent-color, #00bfff);
+  background:
+    radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.85), transparent 28%),
+    linear-gradient(180deg, var(--accent-color, #00bfff), #0b4e4a);
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  border: 2px solid #fff;
-  box-shadow: 0 0 10px var(--glow-color, rgba(0, 191, 255, 0.7)), inset 0 0 5px rgba(255,255,255,0.5);
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 0 10px var(--glow-color, rgba(0, 191, 255, 0.7)),
+    0 18px 30px rgba(13, 127, 119, 0.18),
+    inset 0 0 5px rgba(255, 255, 255, 0.5);
 }
 
 .joystick-label {
-  font-weight: bold;
+  font-weight: 700;
   color: var(--text-secondary-color, #a0a0a5);
+  letter-spacing: 0.04em;
 }
 
 @media (max-width: 768px) {
