@@ -227,6 +227,8 @@ function finishAutoCalibration() {
 }
 
 function applyCrsfSnapshot(snapshot) {
+  let receivedMenuPayload = false;
+
   if (snapshot.status) {
     crsfStatus.value = {
       ...crsfStatus.value,
@@ -244,10 +246,22 @@ function applyCrsfSnapshot(snapshot) {
     crsfMenus.value = snapshot.menus
       .map(normalizeCrsfMenuItem)
       .filter(item => Number.isFinite(item.id) && item.id > 0);
+    receivedMenuPayload = true;
   }
 
   hasLiveCrsfData.value = true;
-  crsfLoading.value = false;
+  if (receivedMenuPayload) {
+    crsfLoading.value = false;
+    return;
+  }
+
+  if (snapshot.status) {
+    const loadedParams = Number(snapshot.status.loadedParams ?? snapshot.status.loaded_params ?? -1);
+    const totalParams = Number(snapshot.status.totalParams ?? snapshot.status.total_params ?? -1);
+    if (totalParams > 0 && loadedParams >= totalParams) {
+      crsfLoading.value = false;
+    }
+  }
 }
 
 function tryApplyCrsfPacket(line) {
@@ -341,7 +355,6 @@ function clearCrsfLoadingSoon() {
 function handleCrsfRefresh() {
   crsfLoading.value = true;
   sendBridgeMessage('CRSF_REFRESH');
-  clearCrsfLoadingSoon();
 }
 
 function handleCrsfBind(item) {
@@ -1182,6 +1195,12 @@ select {
     justify-items: center;
   }
 
+  .toolbar-block {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+
   .hero-actions,
   .hero-metrics {
     min-width: 0;
@@ -1244,7 +1263,7 @@ select {
   }
 
   .auto-calibration-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .compact-action {

@@ -1,6 +1,8 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
+#include <ctype.h>
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -18,8 +20,10 @@ static const char *TAG = "FPV_RC";
 #define CRSF_UART_PORT   UART_NUM_1
 #define CRSF_UART_TX_PIN GPIO_NUM_17
 #define CRSF_UART_RX_PIN GPIO_NUM_16
-#define MODE_WIFI_PIN    RC_SWITCH_3POS_UP_PIN
-#define MODE_BLE_PIN     RC_SWITCH_3POS_DOWN_PIN
+#define CRSF_PARAM_TYPE_COMMAND 0x0D
+#define FALLBACK_BIND_PARAM_ID 18
+#define AUTO_BIND_INTERVAL_MS 2000U
+#define AUTO_BIND_LINK_STABLE_MS 1200U
 // 赋初始合法值，防止未启用的通道发送 0 导致 Windows 丢弃整个 HID 报文
 static fpv_joystick_report_t joy = {
     .roll = 1500, .pitch = 1500, .throttle = 1000, .yaw = 1500,
@@ -141,6 +145,55 @@ static void sync_joy_to_crsf(const fpv_joystick_report_t *report) {
     crsf_set_channel(15, report->sw8);
 }
 
+static bool contains_case_insensitive(const char *text, const char *token)
+{
+    if (!text || !token || token[0] == '\0') {
+        return false;
+    }
+
+    size_t token_len = strlen(token);
+    size_t text_len = strlen(text);
+    if (token_len > text_len) {
+        return false;
+    }
+
+    for (size_t i = 0; i + token_len <= text_len; ++i) {
+        bool matched = true;
+        for (size_t j = 0; j < token_len; ++j) {
+            char a = (char)tolower((unsigned char)text[i + j]);
+            char b = (char)tolower((unsigned char)token[j]);
+            if (a != b) {
+                matched = false;
+                break;
+            }
+        }
+        if (matched) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static uint8_t find_bind_param_id(const crsf_state_t *state)
+{
+    if (!state) {
+        return 0;
+    }
+
+    for (int i = 0; i < CRSF_MAX_MENU_ITEMS; ++i) {
+        const crsf_menu_item_t *item = &state->menu[i];
+        if (!item->is_valid || item->type != CRSF_PARAM_TYPE_COMMAND) {
+            continue;
+        }
+        if (contains_case_insensitive(item->name, "bind")) {
+            return item->id;
+        }
+    }
+
+    return 0;
+}
+
 void my_crsf_device_info_callback(const char *name) {
     // 你终于在 main.c 里拿到高频头的名字了！
     // 如果你有屏幕，你可以直接在这里调用 lvgl 的接口把 name 显示在屏幕上：
@@ -154,6 +207,14 @@ void app_main(void)
     uint8_t ble_mode = 0;
     uint8_t last_loaded_params = 0;
     bool printed_full_snapshot = false;
+    bool host_mode_selected = false;
+    bool bind_mode_active = false;
+    bool bind_complete_logged = false;
+    bool waiting_link_logged = false;
+    bool link_ready_logged = false;
+    uint32_t last_bind_try_ms = 0;
+    uint32_t bind_link_up_since_ms = 0;
+    uint32_t last_bind_wait_log_ms = 0;
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -171,7 +232,10 @@ void app_main(void)
         .pull_down_en = false,
     };
     const gpio_config_t mode_select_config = {
-        .pin_bit_mask = (1ULL << MODE_WIFI_PIN) | (1ULL << MODE_BLE_PIN),
+        .pin_bit_mask = (1ULL << RC_SWITCH_2POS_PIN_CH1) |
+                        (1ULL << RC_SWITCH_2POS_PIN_CH3) |
+                        (1ULL << RC_SWITCH_3POS_UP_PIN) |
+                        (1ULL << RC_SWITCH_3POS_DOWN_PIN),
         .mode = GPIO_MODE_INPUT,
         .intr_type = GPIO_INTR_DISABLE,
         .pull_up_en = true,
@@ -188,42 +252,104 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(gpio_config(&boot_button_config));
     ESP_ERROR_CHECK(gpio_config(&mode_select_config));
-    ESP_LOGI(TAG, "CRSF UART pin map: TX=%d RX=%d | mode pins wifi=%d ble=%d",
-             CRSF_UART_TX_PIN, CRSF_UART_RX_PIN, MODE_WIFI_PIN, MODE_BLE_PIN);
+    ESP_LOGI(TAG, "CRSF UART pin map: TX=%d RX=%d", CRSF_UART_TX_PIN, CRSF_UART_RX_PIN);
     xTaskCreatePinnedToCore( ADC_TASK, "adc_task", 4096, &joy,  4, NULL, 1 );
     crsf_init(&crsf_cfg);
 
     vTaskDelay(pdMS_TO_TICKS(50));
 
+    bool ch1_low = (gpio_get_level(RC_SWITCH_2POS_PIN_CH1) == 0);
+    bool ch3_low = (gpio_get_level(RC_SWITCH_2POS_PIN_CH3) == 0);
+    bool up_low = (gpio_get_level(RC_SWITCH_3POS_UP_PIN) == 0);
+    bool down_low = (gpio_get_level(RC_SWITCH_3POS_DOWN_PIN) == 0);
 
-    if (gpio_get_level(MODE_WIFI_PIN) == 0)
-    {
-        rc_wifi_server_init(&joy);
-    } else if (gpio_get_level(MODE_BLE_PIN) == 0)
-    {
-        ble_init(&joy);
-        ble_mode = 1;
+    if (ch1_low) {
+        host_mode_selected = true;
+        if (up_low) {
+            ble_init(&joy);
+            ble_mode = 1;
+            ESP_LOGI(TAG, "开机模式: BLE (CH1低 + 3段上低)");
+        } else if (down_low) {
+            rc_wifi_server_init(&joy);
+            ESP_LOGI(TAG, "开机模式: WiFi (CH1低 + 3段下低)");
+        } else {
+            usb_init();
+            ESP_LOGI(TAG, "开机模式: USB (CH1低 + 3段中位)");
+        }
     } else {
-        usb_init();
+        ESP_LOGI(TAG, "开机模式: 纯射频模式 (CH1高)");
     }
-    
-    
-    
+
+    if (ch3_low) {
+        bind_mode_active = true;
+        ESP_LOGI(TAG, "检测到 CH3 低电平，进入开机自动对频模式");
+    }
+
     while (1)
     {
+        crsf_state_t *state = crsf_get_state();
+        uint32_t now_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+
         if (ble_mode) 
         {
             ble_update_input(&joy);
         }
 
-        sync_joy_to_crsf(&joy);
+        if (host_mode_selected) {
+            sync_joy_to_crsf(&joy);
+        } else if (state->is_linked) {
+            if (!link_ready_logged) {
+                ESP_LOGI(TAG, "高频头已连接接收机，开始发送全部通道数据");
+                link_ready_logged = true;
+            }
+            waiting_link_logged = false;
+            sync_joy_to_crsf(&joy);
+        } else if (!waiting_link_logged) {
+            ESP_LOGI(TAG, "等待高频头连接接收机...");
+            waiting_link_logged = true;
+            link_ready_logged = false;
+        }
+
+        if (bind_mode_active) {
+            if (state->is_linked) {
+                if (bind_link_up_since_ms == 0) {
+                    bind_link_up_since_ms = now_ms;
+                    ESP_LOGI(TAG, "检测到链路上线，开始验证对频稳定性...");
+                }
+                if ((now_ms - bind_link_up_since_ms) >= AUTO_BIND_LINK_STABLE_MS) {
+                    bind_mode_active = false;
+                    if (!bind_complete_logged) {
+                        ESP_LOGI(TAG, "对频成功(链路稳定 %ums)，退出自动对频模式", AUTO_BIND_LINK_STABLE_MS);
+                        bind_complete_logged = true;
+                    }
+                }
+            } else if (state->is_ready && state->total_params > 0 && state->loaded_params == state->total_params) {
+                bind_link_up_since_ms = 0;
+                if (now_ms - last_bind_try_ms >= AUTO_BIND_INTERVAL_MS) {
+                    uint8_t bind_param_id = find_bind_param_id(state);
+                    if (bind_param_id == 0) {
+                        bind_param_id = FALLBACK_BIND_PARAM_ID;
+                    }
+                    crsf_write_menu_value(bind_param_id, 1);
+                    last_bind_try_ms = now_ms;
+                    ESP_LOGI(TAG, "自动对频发包: PARAM_WRITE id=%u value=1 (间隔=%ums)", bind_param_id, AUTO_BIND_INTERVAL_MS);
+                }
+            } else if ((now_ms - last_bind_wait_log_ms) >= 2000U) {
+                last_bind_wait_log_ms = now_ms;
+                ESP_LOGI(TAG, "自动对频等待中: ready=%d menu=%u/%u linked=%d",
+                         state->is_ready ? 1 : 0,
+                         state->loaded_params,
+                         state->total_params,
+                         state->is_linked ? 1 : 0);
+                bind_link_up_since_ms = 0;
+            }
+        }
 
         if (tud_mounted())
         {
             app_send_fpv_data(&joy);
         }
 
-        crsf_state_t *state = crsf_get_state();
         if (state->loaded_params != last_loaded_params) {
             last_loaded_params = state->loaded_params;
             if (!printed_full_snapshot && state->total_params > 0 &&
@@ -235,6 +361,10 @@ void app_main(void)
         if (state->is_ready && state->total_params > 0 && state->loaded_params == state->total_params && !printed_full_snapshot) {
             print_crsf_state_snapshot(state);
             printed_full_snapshot = true;
+        }
+
+        if (state->loaded_params == 0) {
+            printed_full_snapshot = false;
         }
 
         crsf_send_device_ping();

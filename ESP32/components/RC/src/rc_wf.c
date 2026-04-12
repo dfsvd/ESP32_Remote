@@ -573,8 +573,10 @@ static esp_err_t ws_handler(httpd_req_t *req)
             else if (strcmp(text, "CRSF_REFRESH") == 0) {
                 ESP_LOGI(TAG, "网页命令 refresh: 请求刷新 CRSF 菜单");
                 crsf_request_menu_reload();
-                ws_send_crsf_snapshot(req);
-                ESP_LOGI(TAG, "已响应 CRSF_REFRESH");
+                char status_buf[CRSF_STATUS_BUF_SIZE];
+                build_crsf_status_payload(status_buf, sizeof(status_buf));
+                ws_send_text(req, status_buf);
+                ESP_LOGI(TAG, "已响应 CRSF_REFRESH，等待菜单重载完成后下发新快照");
             }
             else if (strncmp(text, "CRSF_WRITE:", 11) == 0) {
                 int param_id = -1;
@@ -630,6 +632,7 @@ static void ws_broadcast_task(void *arg)
     
     char send_buf[512]; 
     char status_buf[CRSF_STATUS_BUF_SIZE];
+    static char menu_buf[CRSF_MENU_BUF_SIZE];
     httpd_ws_frame_t ws_pkt;
     memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
     ws_pkt.type = HTTPD_WS_TYPE_TEXT;
@@ -641,6 +644,8 @@ static void ws_broadcast_task(void *arg)
     uint8_t last_lq = 0xFF;
     int8_t last_snr = 0x7F;
     char last_device_name[64] = {0};
+    uint8_t last_menu_loaded_params = 0xFF;
+    uint8_t last_menu_total_params = 0xFF;
 
     while (1) {
         // 确保 server 开启，并且 joy 指针不为空
@@ -704,6 +709,22 @@ static void ws_broadcast_task(void *arg)
                     sizeof(last_device_name))) {
                 build_crsf_status_payload(status_buf, sizeof(status_buf));
                 ws_broadcast_text(status_buf);
+            }
+
+            if (state &&
+                (state->loaded_params != last_menu_loaded_params ||
+                 state->total_params != last_menu_total_params)) {
+                last_menu_loaded_params = state->loaded_params;
+                last_menu_total_params = state->total_params;
+
+                if (state->total_params > 0 && state->loaded_params == state->total_params) {
+                    size_t menu_payload_len = build_crsf_menu_payload(menu_buf, sizeof(menu_buf));
+                    if (menu_payload_len > 0) {
+                        ws_broadcast_text(menu_buf);
+                        ESP_LOGI(TAG, "已推送 CRSF 菜单快照: %u/%u",
+                                 state->loaded_params, state->total_params);
+                    }
+                }
             }
         }
         vTaskDelay(pdMS_TO_TICKS(50)); // 20Hz 刷新率

@@ -72,16 +72,18 @@ typedef struct {
 // #define ADC_aux4        ADC_CHANNEL_3
 
 // 开关引脚统一提成宏，避免和 CRSF/UART 占用冲突
-#define RC_SWITCH_2POS_PIN       GPIO_NUM_38
+#define RC_SWITCH_2POS_PIN_CH3   GPIO_NUM_36
+#define RC_SWITCH_2POS_PIN_CH4   GPIO_NUM_37
+#define RC_SWITCH_2POS_PIN_CH1   GPIO_NUM_38
 #define RC_SWITCH_3POS_UP_PIN    GPIO_NUM_39
 #define RC_SWITCH_3POS_DOWN_PIN  GPIO_NUM_40
 
-#define GPIO_SW         ((1ULL << RC_SWITCH_2POS_PIN) | (1ULL << RC_SWITCH_3POS_UP_PIN) | (1ULL << RC_SWITCH_3POS_DOWN_PIN))
+#define GPIO_SW         ((1ULL << RC_SWITCH_2POS_PIN_CH1) | (1ULL << RC_SWITCH_3POS_UP_PIN) | (1ULL << RC_SWITCH_3POS_DOWN_PIN)| (1ULL << RC_SWITCH_2POS_PIN_CH3)| (1ULL << RC_SWITCH_2POS_PIN_CH4))
 
-#define READ_KEY_CH1    read_2pos_switch(RC_SWITCH_2POS_PIN, true)
+#define READ_KEY_CH1    read_2pos_switch(RC_SWITCH_2POS_PIN_CH1, true)
 #define READ_KEY_CH2    read_3pos_switch(RC_SWITCH_3POS_UP_PIN, RC_SWITCH_3POS_DOWN_PIN)
-#define READ_KEY_CH3    1500
-#define READ_KEY_CH4    1500
+#define READ_KEY_CH3    read_2pos_switch(RC_SWITCH_2POS_PIN_CH3, true)
+#define READ_KEY_CH4    read_2pos_switch(RC_SWITCH_2POS_PIN_CH4, true)
 #define READ_KEY_CH5    1500
 #define READ_KEY_CH6    1500
 #define READ_KEY_CH7    1500
