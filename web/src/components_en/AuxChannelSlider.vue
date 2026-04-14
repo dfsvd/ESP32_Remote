@@ -110,7 +110,6 @@ const emit = defineEmits(['update:rawValue']);
 const isCollapsed = ref(true);
 
 const percentValue = computed(() => {
-  // 1000-2000 mapped to -100% to 100%
   return Math.round((props.mappedValue - 1500) / 5);
 });
 

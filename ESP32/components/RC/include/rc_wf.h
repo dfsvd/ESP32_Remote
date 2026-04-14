@@ -4,6 +4,7 @@ extern "C" {
 #endif
 
 #include "rc_read.h"
+#include <stdbool.h>
 
 
 
@@ -12,6 +13,7 @@ extern "C" {
 void rc_wifi_server_init(fpv_joystick_report_t *joy);
 void load_settings_from_nvs(void);
 void save_settings_to_nvs(void);
+bool get_saved_crsf_link_mode(bool *half_duplex);
 #ifdef __cplusplus
 }
 #endif

@@ -36,6 +36,8 @@ typedef struct {
     uint32_t baud_rate;
     int tx_pin;
     int rx_pin;
+    bool half_duplex;
+    bool invert_signal;
     int task_priority;
     int task_core_id;
     void (*on_device_info_cb)(const char *name);
@@ -47,3 +49,5 @@ void crsf_set_channel(uint8_t channel_idx, uint16_t value_us);
 void crsf_write_menu_value(uint8_t param_id, uint8_t new_value);
 void crsf_send_device_ping(void);
 void crsf_request_menu_reload(void);
+void crsf_set_link_mode(bool half_duplex);
+bool crsf_is_half_duplex(void);

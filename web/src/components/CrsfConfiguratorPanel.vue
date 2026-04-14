@@ -1,12 +1,12 @@
 <template>
-  <section class="crsf-configurator">
-    <header class="toolbar-strip">
-      <div class="hero-actions">
-        <button class="ghost-btn" type="button" @click="$emit('refresh')">
+  <section class="grid gap-[18px] p-6 rounded-[28px] text-darwin-ink bg-[radial-gradient(circle_at_top_left,rgba(245,166,35,0.1),transparent_35%),radial-gradient(circle_at_top_right,rgba(217,119,6,0.1),transparent_28%),linear-gradient(180deg,rgba(45,45,45,0.9),rgba(35,35,35,0.9))] shadow-[0_28px_80px_rgba(0,0,0,0.4)] border border-white/5">
+    <header class="flex flex-col lg:flex-row items-stretch justify-between gap-4 p-4 lg:p-[18px] rounded-[24px] bg-gradient-to-br from-white/10 to-transparent border border-white/10">
+      <div class="flex items-center gap-3 flex-wrap">
+        <button class="px-[18px] py-[12px] bg-white/10 border border-white/10 text-darwin-ink font-bold rounded-full cursor-pointer transition-all hover:-translate-y-px hover:bg-white/20" type="button" @click="$emit('refresh')">
           刷新
         </button>
         <button
-          class="primary-btn"
+          class="px-[18px] py-[12px] border border-transparent bg-gradient-to-br from-darwin-amber to-darwin-orange text-black font-bold rounded-full shadow-[0_16px_30px_rgba(245,166,35,0.2)] cursor-pointer transition-all hover:-translate-y-px disabled:opacity-60 disabled:cursor-not-allowed"
           type="button"
           :disabled="loading || !bindItem"
           @click="triggerBind"
@@ -15,68 +15,71 @@
         </button>
       </div>
 
-      <section class="status-strip">
-        <article class="stat-card">
-          <span class="stat-label">链路</span>
-          <strong :class="['stat-value', status.isLinked ? 'ok' : 'muted']">
+      <section class="grid grid-cols-3 gap-2.5 lg:gap-[14px] flex-auto">
+        <article class="p-3.5 lg:p-[18px] rounded-[18px] text-center lg:text-left bg-[#1f1f22] border border-white/5">
+          <span class="block mb-1.5 lg:mb-2 text-[11px] lg:text-xs uppercase tracking-[0.16em] text-darwin-muted">链路</span>
+          <strong class="block text-[18px] lg:text-[26px] leading-[1.15]" :class="status.isLinked ? 'text-darwin-amber' : 'text-[#8b6f5d]'">
             {{ status.isLinked ? "已连接" : "离线" }}
           </strong>
         </article>
 
-        <article class="stat-card">
-          <span class="stat-label">信号</span>
-          <strong class="stat-value">{{ status.rssi ?? "--" }}</strong>
+        <article class="p-3.5 lg:p-[18px] rounded-[18px] text-center lg:text-left bg-[#1f1f22] border border-white/5">
+          <span class="block mb-1.5 lg:mb-2 text-[11px] lg:text-xs uppercase tracking-[0.16em] text-darwin-muted">信号</span>
+          <strong class="block text-[18px] lg:text-[26px] leading-[1.15] text-darwin-ink">{{ status.rssi ?? "--" }}</strong>
         </article>
 
-        <article class="stat-card">
-          <span class="stat-label">菜单同步</span>
-          <strong class="stat-value">
+        <article class="p-3.5 lg:p-[18px] rounded-[18px] text-center lg:text-left bg-[#1f1f22] border border-white/5">
+          <span class="block mb-1.5 lg:mb-2 text-[11px] lg:text-xs uppercase tracking-[0.16em] text-darwin-muted">菜单同步</span>
+          <strong class="block text-[18px] lg:text-[26px] leading-[1.15] text-darwin-ink">
             {{ status.loadedParams ?? 0 }} / {{ status.totalParams ?? 0 }}
           </strong>
         </article>
       </section>
     </header>
 
-    <section class="workspace">
-      <aside class="browser">
-        <ul class="menu-list">
+    <section class="p-3.5 lg:p-[18px] rounded-[26px] bg-white/5 border border-white/10">
+      <aside class="p-3.5 lg:p-[18px] rounded-[22px] bg-[#1a1a1c] border border-white/5">
+        <ul class="grid gap-2.5 p-0 m-0 list-none">
           <li
             v-for="entry in visibleItems"
             :key="entry.item.id"
-            class="menu-entry"
+            class="grid gap-0"
             :style="{ '--menu-depth': entry.depth }"
           >
             <button
               type="button"
-              class="menu-item"
+              class="w-full grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[10px] lg:gap-[14px] text-left p-[13px_12px] lg:p-[14px] rounded-[18px] border border-transparent bg-white/5 text-darwin-ink cursor-pointer transition-all hover:-translate-y-px hover:border-darwin-amber/30 hover:shadow-[0_14px_26px_rgba(0,0,0,0.5)]"
               :class="{
-                expanded: isExpanded(entry.item.id),
-                folder: entry.item.kind === 'folder',
-                nested: entry.depth > 0,
+                '!-translate-y-px !border-darwin-amber/30 !shadow-[0_14px_26px_rgba(0,0,0,0.5)] bg-gradient-to-b from-darwin-amber/10 to-transparent': isExpanded(entry.item.id),
+                'bg-gradient-to-b from-white/10 to-white/5': entry.item.kind === 'folder' && isExpanded(entry.item.id),
+                '!bg-white/10': entry.depth > 0,
               }"
+              :style="{ paddingLeft: `calc(12px + (${entry.depth} * 18px))` }"
               @click="toggleItem(entry.item)"
             >
-              <span class="menu-meta">
-                <span class="menu-icon">{{ kindIcon(entry.item.kind) }}</span>
-                <span class="menu-copy">
-                  <strong>{{ entry.item.name }}</strong>
-                  <small>#{{ entry.item.id }} · {{ entry.item.kindLabel }}</small>
+              <span class="flex items-center gap-3 min-w-0">
+                <span class="flex-shrink-0 grid place-items-center w-[34px] h-[34px] lg:w-[38px] lg:h-[38px] rounded-[10px] lg:rounded-[12px] bg-darwin-amber/10 text-darwin-amber text-xs font-bold">{{ kindIcon(entry.item.kind) }}</span>
+                <span class="grid align-content-center min-w-0">
+                  <strong class="block leading-[1.2] break-words">{{ entry.item.name }}</strong>
+                  <small class="block mt-1 text-xs text-darwin-muted">#{{ entry.item.id }} · {{ entry.item.kindLabel }}</small>
                 </span>
               </span>
 
-              <span class="menu-tail">
-                <span v-if="entry.item.kind === 'select'" class="pill">
+              <span class="flex items-center self-center justify-self-end gap-2 flex-shrink-0">
+                <span v-if="entry.item.kind === 'select'" class="inline-flex items-center justify-center px-2.5 py-1.5 rounded-full text-[11px] lg:text-xs font-bold whitespace-nowrap bg-darwin-amber/10 text-darwin-amber max-w-full">
                   {{ displayCurrentOption(entry.item) }}
                 </span>
-                <span v-else-if="entry.item.kind === 'info'" class="pill subtle">
+                <span v-else-if="entry.item.kind === 'info'" class="inline-flex items-center justify-center px-2.5 py-1.5 rounded-full text-[11px] lg:text-xs font-bold whitespace-nowrap bg-white/10 text-darwin-muted max-w-full">
                   只读
                 </span>
-                <span v-else-if="entry.item.kind === 'command'" class="pill warn">
+                <span v-else-if="entry.item.kind === 'command'" class="inline-flex items-center justify-center px-2.5 py-1.5 rounded-full text-[11px] lg:text-xs font-bold whitespace-nowrap bg-[#cb7a2f]/20 text-[#d97706] max-w-full">
                   命令
                 </span>
                 <span
-                  class="arrow"
-                  :class="{ expanded: isExpanded(entry.item.id) }"
+                  class="text-[18px] text-darwin-amber transition-transform duration-160"
+                  :class="{ 'rotate-90': isExpanded(entry.item.id) }"
+                  style="transform: rotate(-90deg);"
+                  :style="{ transform: isExpanded(entry.item.id) ? 'rotate(0deg)' : 'rotate(-90deg)' }"
                 >
                   ▾
                 </span>
@@ -85,28 +88,29 @@
 
             <section
               v-if="isExpanded(entry.item.id) && entry.item.kind !== 'folder'"
-              class="menu-inline-detail"
+              class="grid gap-2.5"
+              :style="{ paddingLeft: `calc(12px + (${entry.depth} * 18px))` }"
             >
-              <section v-if="entry.item.kind === 'select'" class="detail-card inline-card">
-                <div class="option-grid">
+              <section v-if="entry.item.kind === 'select'" class="p-4 mt-2.5 border border-white/5 rounded-[18px] bg-[#1f1f22]">
+                <div class="grid grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
                   <button
                     v-for="option in entry.item.optionItems"
                     :key="`${entry.item.id}-${option.index}`"
                     type="button"
-                    class="option-card"
-                    :class="{ selected: option.index === entry.item.value }"
+                    class="min-h-[90px] grid content-between p-3.5 rounded-[18px] border border-white/10 bg-white/5 text-left cursor-pointer text-darwin-ink transition-all hover:-translate-y-px hover:border-darwin-amber/40 hover:shadow-[0_14px_26px_rgba(0,0,0,0.4)]"
+                    :class="{ 'border-darwin-amber/50 bg-gradient-to-b from-darwin-amber/10 to-transparent shadow-[0_14px_26px_rgba(0,0,0,0.4)]': option.index === entry.item.value }"
                     @click.stop="emitSelectChange(entry.item, option)"
                   >
-                    <span class="option-index">{{ option.index }}</span>
-                    <strong>{{ option.label }}</strong>
+                    <span class="inline-flex w-fit px-2 py-1 rounded-full bg-black/20 text-[11px] tracking-[0.08em] uppercase text-darwin-muted">{{ option.index }}</span>
+                    <strong class="block leading-[1.2] break-words">{{ option.label }}</strong>
                   </button>
                 </div>
               </section>
 
-              <section v-else-if="entry.item.kind === 'command'" class="detail-card inline-card">
-                <div class="command-actions">
+              <section v-else-if="entry.item.kind === 'command'" class="p-4 mt-2.5 border border-white/5 rounded-[18px] bg-[#1f1f22]">
+                <div class="flex items-center gap-3 flex-wrap">
                   <button
-                    class="primary-btn"
+                    class="px-[18px] py-[12px] border border-transparent bg-gradient-to-br from-darwin-amber to-darwin-orange text-black font-bold rounded-full shadow-[0_16px_30px_rgba(245,166,35,0.2)] cursor-pointer transition-all hover:-translate-y-px disabled:opacity-60 disabled:cursor-not-allowed"
                     type="button"
                     :disabled="loading"
                     @click.stop="triggerCommand(entry.item)"
@@ -116,12 +120,12 @@
                 </div>
               </section>
 
-              <section v-else-if="entry.item.kind === 'info'" class="detail-card inline-card">
-                <div class="info-block">{{ entry.item.content || "-" }}</div>
+              <section v-else-if="entry.item.kind === 'info'" class="p-4 mt-2.5 border border-white/5 rounded-[18px] bg-[#1f1f22]">
+                <div class="p-4 rounded-[16px] bg-black/30 border border-white/5 text-darwin-muted font-mono break-words">{{ entry.item.content || "-" }}</div>
               </section>
 
-              <section v-else class="detail-card inline-card">
-                <div class="info-block">{{ entry.item.content || "No preview available." }}</div>
+              <section v-else class="p-4 mt-2.5 border border-white/5 rounded-[18px] bg-[#1f1f22]">
+                <div class="p-4 rounded-[16px] bg-black/30 border border-white/5 text-darwin-muted font-mono break-words">{{ entry.item.content || "No preview available." }}</div>
               </section>
             </section>
           </li>
@@ -216,13 +220,28 @@ function kindLabel(kind) {
 
 function optionItems(rawOptions) {
   if (Array.isArray(rawOptions)) {
-    return rawOptions.map((label, index) => ({ index, label }));
+    return rawOptions.map((label, index) => ({
+      index,
+      rawLabel: String(label ?? "").trim(),
+      label: compactOptionLabel(label),
+    }));
   }
   if (!rawOptions) return [];
   return String(rawOptions)
     .split(";")
-    .map((label, index) => ({ index, label: label.trim() }))
+    .map((label, index) => ({
+      index,
+      rawLabel: label.trim(),
+      label: compactOptionLabel(label),
+    }))
     .filter((item) => item.label.length > 0);
+}
+
+function compactOptionLabel(label) {
+  const text = String(label ?? "").trim();
+  if (!text) return "";
+  const withoutDbm = text.replace(/\s*\([^)]*\)\s*$/u, "").trim();
+  return withoutDbm || text;
 }
 
 function isBindLike(name = "") {
@@ -372,380 +391,3 @@ watch(
   { immediate: true }
 );
 </script>
-
-<style scoped>
-.crsf-configurator {
-  --bg: #f4f1ea;
-  --panel: rgba(255, 250, 242, 0.9);
-  --panel-strong: #fffdf8;
-  --ink: #182126;
-  --muted: #627078;
-  --line: rgba(24, 33, 38, 0.1);
-  --accent: #0f7b78;
-  --accent-strong: #0c6461;
-  --warn: #cb7a2f;
-  --glow: rgba(15, 123, 120, 0.16);
-  display: grid;
-  gap: 18px;
-  padding: 24px;
-  border-radius: 28px;
-  color: var(--ink);
-  background:
-    radial-gradient(circle at top left, rgba(15, 123, 120, 0.18), transparent 35%),
-    radial-gradient(circle at top right, rgba(203, 122, 47, 0.16), transparent 28%),
-    linear-gradient(180deg, #fcfbf7 0%, var(--bg) 100%);
-  box-shadow: 0 28px 80px rgba(42, 54, 65, 0.12);
-}
-
-.toolbar-strip,
-.workspace,
-.browser,
-.detail-card {
-  border: 1px solid var(--line);
-}
-
-.toolbar-strip {
-  display: flex;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px;
-  border-radius: 24px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.85), rgba(247, 241, 231, 0.94));
-}
-
-.hero-actions,
-.command-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.status-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  flex: 1 1 auto;
-}
-
-.stat-card {
-  padding: 18px;
-  border-radius: 18px;
-  background: var(--panel-strong);
-}
-
-.stat-label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  color: var(--muted);
-}
-
-.stat-value {
-  display: block;
-  font-size: 26px;
-}
-
-.stat-value.ok {
-  color: var(--accent-strong);
-}
-
-.stat-value.muted {
-  color: #8b6f5d;
-}
-
-.workspace {
-  padding: 18px;
-  border-radius: 26px;
-  background: rgba(255, 255, 255, 0.55);
-}
-
-.browser {
-  padding: 18px;
-  border-radius: 22px;
-  background: var(--panel);
-}
-
-.ghost-btn,
-.primary-btn,
-.menu-item,
-.option-card {
-  transition:
-    transform 160ms ease,
-    box-shadow 160ms ease,
-    border-color 160ms ease,
-    background 160ms ease;
-}
-
-.ghost-btn {
-  border: 1px solid var(--line);
-  background: white;
-  color: var(--ink);
-}
-
-.ghost-btn,
-.primary-btn {
-  padding: 12px 18px;
-  border-radius: 999px;
-  cursor: pointer;
-  font-weight: 700;
-}
-
-.primary-btn {
-  border: 1px solid transparent;
-  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-  color: white;
-  box-shadow: 0 16px 30px var(--glow);
-}
-
-.primary-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.menu-list {
-  display: grid;
-  gap: 10px;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.menu-entry {
-  display: grid;
-  gap: 0;
-}
-
-.menu-item {
-  width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  text-align: left;
-  padding: 14px;
-  padding-left: calc(14px + (var(--menu-depth) * 18px));
-  border-radius: 18px;
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.84);
-  cursor: pointer;
-}
-
-.menu-item.expanded,
-.menu-item:hover,
-.option-card:hover,
-.ghost-btn:hover,
-.primary-btn:hover {
-  transform: translateY(-1px);
-  border-color: rgba(15, 123, 120, 0.3);
-  box-shadow: 0 14px 26px rgba(24, 33, 38, 0.08);
-}
-
-.menu-item.nested {
-  background: rgba(252, 249, 243, 0.92);
-}
-
-.menu-item.folder.expanded {
-  background: linear-gradient(180deg, rgba(15, 123, 120, 0.08), rgba(255, 255, 255, 0.95));
-}
-
-.menu-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.menu-copy {
-  min-width: 0;
-  display: grid;
-  align-content: center;
-}
-
-.menu-meta strong,
-.option-card strong {
-  display: block;
-  line-height: 1.2;
-  word-break: break-word;
-}
-
-.menu-meta small {
-  display: block;
-  margin-top: 4px;
-  font-size: 12px;
-}
-
-.menu-icon {
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  background: rgba(15, 123, 120, 0.1);
-  color: var(--accent-strong);
-  font-size: 12px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.menu-tail {
-  display: flex;
-  align-items: center;
-  align-self: center;
-  justify-self: end;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 7px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-  background: rgba(15, 123, 120, 0.1);
-  color: var(--accent-strong);
-}
-
-.pill.subtle {
-  background: rgba(98, 112, 120, 0.12);
-  color: #40525b;
-}
-
-.pill.warn {
-  background: rgba(203, 122, 47, 0.16);
-  color: #9a5d1f;
-}
-
-.arrow {
-  font-size: 18px;
-  color: var(--accent-strong);
-  transform: rotate(-90deg);
-  transition: transform 160ms ease;
-}
-
-.arrow.expanded {
-  transform: rotate(0deg);
-}
-
-.menu-inline-detail {
-  display: grid;
-  gap: 10px;
-  padding-left: calc(14px + (var(--menu-depth) * 18px));
-}
-
-.detail-card {
-  padding: 16px;
-  margin-top: 10px;
-  border-radius: 18px;
-  background: var(--panel-strong);
-}
-
-.option-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
-}
-
-.option-card {
-  min-height: 90px;
-  display: grid;
-  align-content: space-between;
-  padding: 14px;
-  border-radius: 18px;
-  border: 1px solid var(--line);
-  background: rgba(248, 244, 236, 0.86);
-  text-align: left;
-  cursor: pointer;
-}
-
-.option-card.selected {
-  border-color: rgba(15, 123, 120, 0.45);
-  background: linear-gradient(180deg, rgba(15, 123, 120, 0.08), rgba(255, 255, 255, 0.98));
-}
-
-.option-index {
-  display: inline-flex;
-  width: fit-content;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(24, 33, 38, 0.08);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.info-block {
-  padding: 16px;
-  border-radius: 16px;
-  background: #f5f1e7;
-  border: 1px solid rgba(24, 33, 38, 0.08);
-  color: #2f3b42;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  word-break: break-word;
-}
-
-@media (max-width: 960px) {
-  .toolbar-strip {
-    display: grid;
-    gap: 12px;
-  }
-
-  .status-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .workspace {
-    padding: 14px;
-  }
-
-  .stat-card {
-    padding: 14px 10px;
-    text-align: center;
-  }
-
-  .stat-label {
-    margin-bottom: 6px;
-    font-size: 11px;
-    letter-spacing: 0.12em;
-  }
-
-  .stat-value {
-    font-size: 18px;
-    line-height: 1.15;
-  }
-
-  .menu-item {
-    gap: 10px;
-    padding: 13px 12px;
-    padding-left: calc(12px + (var(--menu-depth) * 14px));
-  }
-
-  .menu-inline-detail {
-    padding-left: calc(12px + (var(--menu-depth) * 14px));
-  }
-
-  .menu-icon {
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
-  }
-
-  .pill {
-    max-width: 100%;
-    padding: 6px 10px;
-    font-size: 11px;
-  }
-
-  .option-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-</style>

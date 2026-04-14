@@ -17,9 +17,14 @@
 
 static const char *TAG = "FPV_RC";
 #define APP_BUTTON (GPIO_NUM_0) // Use BOOT signal by default
+#define CRSF_LINK_MODE_UART_FULL_DUPLEX 0
+#define CRSF_LINK_MODE_UART_HALF_DUPLEX 1
+#define CRSF_LINK_MODE CRSF_LINK_MODE_UART_FULL_DUPLEX
 #define CRSF_UART_PORT   UART_NUM_1
 #define CRSF_UART_TX_PIN GPIO_NUM_17
 #define CRSF_UART_RX_PIN GPIO_NUM_16
+#define CRSF_UART_HALF_DUPLEX_PIN GPIO_NUM_17
+#define CRSF_UART_INVERTED 0
 #define CRSF_PARAM_TYPE_COMMAND 0x0D
 #define FALLBACK_BIND_PARAM_ID 18
 #define AUTO_BIND_INTERVAL_MS 2000U
@@ -215,6 +220,9 @@ void app_main(void)
     uint32_t last_bind_try_ms = 0;
     uint32_t bind_link_up_since_ms = 0;
     uint32_t last_bind_wait_log_ms = 0;
+    bool saved_half_duplex = false;
+    bool has_saved_half_duplex = false;
+    bool boot_half_duplex = false;
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -223,6 +231,10 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
   
     load_settings_from_nvs();
+    has_saved_half_duplex = get_saved_crsf_link_mode(&saved_half_duplex);
+    boot_half_duplex = has_saved_half_duplex
+        ? saved_half_duplex
+        : (CRSF_LINK_MODE == CRSF_LINK_MODE_UART_HALF_DUPLEX);
     // Initialize button that will trigger HID reports
     const gpio_config_t boot_button_config = {
         .pin_bit_mask = BIT64(APP_BUTTON),
@@ -243,8 +255,10 @@ void app_main(void)
     };
     crsf_config_t crsf_cfg = {
         .uart_port = CRSF_UART_PORT,
-        .tx_pin = CRSF_UART_TX_PIN, 
-        .rx_pin = CRSF_UART_RX_PIN, 
+        .tx_pin = boot_half_duplex ? CRSF_UART_HALF_DUPLEX_PIN : CRSF_UART_TX_PIN,
+        .rx_pin = boot_half_duplex ? CRSF_UART_HALF_DUPLEX_PIN : CRSF_UART_RX_PIN,
+        .half_duplex = boot_half_duplex,
+        .invert_signal = CRSF_UART_INVERTED,
         .task_priority = 5,
         .task_core_id = 1,
         // 👇 把刚才写的函数名字塞进去
@@ -252,7 +266,22 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(gpio_config(&boot_button_config));
     ESP_ERROR_CHECK(gpio_config(&mode_select_config));
-    ESP_LOGI(TAG, "CRSF UART pin map: TX=%d RX=%d", CRSF_UART_TX_PIN, CRSF_UART_RX_PIN);
+    if (boot_half_duplex) {
+        ESP_LOGI(
+            TAG,
+            "CRSF 启动链路: single-wire (%s) IO=%d inverted=%d",
+            has_saved_half_duplex ? "from NVS" : "from compile default",
+            CRSF_UART_HALF_DUPLEX_PIN,
+            CRSF_UART_INVERTED);
+    } else {
+        ESP_LOGI(
+            TAG,
+            "CRSF 启动链路: dual-wire (%s) TX=%d RX=%d inverted=%d",
+            has_saved_half_duplex ? "from NVS" : "from compile default",
+            CRSF_UART_TX_PIN,
+            CRSF_UART_RX_PIN,
+            CRSF_UART_INVERTED);
+    }
     xTaskCreatePinnedToCore( ADC_TASK, "adc_task", 4096, &joy,  4, NULL, 1 );
     crsf_init(&crsf_cfg);
 

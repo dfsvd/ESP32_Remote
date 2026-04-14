@@ -4,17 +4,21 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5174 --strictPort",
-    "build": "vite build",
-    "preview": "vite preview",
-    "sync:esp32": "cp dist/index.html ../ESP32/components/RC/src/index.html",
-    "build:esp32": "vite build && cp dist/index.html ../ESP32/components/RC/src/index.html"
+    "dev": "node ./node_modules/vite/bin/vite.js --host 0.0.0.0 --port 5174 --strictPort",
+    "build": "node ./node_modules/vite/bin/vite.js build",
+    "preview": "node ./node_modules/vite/bin/vite.js preview",
+    "sync:esp32": "node -e \"require('fs').copyFileSync('dist/index.html', '../ESP32/components/RC/src/index.html')\"",
+    "build:esp32": "node ./node_modules/vite/bin/vite.js build && npm run sync:esp32"
   },
   "dependencies": {
-    "vue": "^3.5.30"
+    "vue": "^3.5.30",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.5",
+    "autoprefixer": "^10.4.27",
+    "postcss": "^8.5.9",
+    "tailwindcss": "^3.4.19",
     "vite": "^8.0.8",
     "vite-plugin-singlefile": "^2.3.2"
   }

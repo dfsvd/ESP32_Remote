@@ -1,4 +1,5 @@
 #include <string.h>
+#include <strings.h>
 #include <stdio.h>
 #include "esp_log.h"
 #include "esp_wifi.h"
@@ -16,6 +17,8 @@ static const char *TAG = "RC_WIFI";
 static httpd_handle_t server = NULL;
 #define CRSF_STATUS_BUF_SIZE 256
 #define CRSF_MENU_BUF_SIZE   12288
+static bool s_saved_crsf_half_duplex = false;
+static bool s_has_saved_crsf_link_mode = false;
 
 // 1. 本地的 16 通道测试数组 (出厂默认值)
 extern channel_cal_t limit[16] ;
@@ -96,14 +99,15 @@ static size_t build_crsf_status_payload(char *buf, size_t buf_size)
         buf,
         buf_size,
         "CRSF_STATUS:{\"is_ready\":%s,\"is_linked\":%s,\"rssi\":%u,\"lq\":%u,\"snr\":%d,"
-        "\"loaded_params\":%u,\"total_params\":%u,\"device_label\":\"",
+        "\"loaded_params\":%u,\"total_params\":%u,\"wire_mode\":\"%s\",\"device_label\":\"",
         state->is_ready ? "true" : "false",
         state->is_linked ? "true" : "false",
         state->rssi,
         state->lq,
         state->snr,
         state->loaded_params,
-        state->total_params
+        state->total_params,
+        crsf_is_half_duplex() ? "single" : "dual"
     );
 
     if (written < 0 || (size_t)written >= buf_size) {
@@ -383,6 +387,14 @@ static esp_err_t ws_send_crsf_snapshot(httpd_req_t *req)
     return ws_send_text(req, menu_buf);
 }
 
+bool get_saved_crsf_link_mode(bool *half_duplex)
+{
+    if (half_duplex) {
+        *half_duplex = s_saved_crsf_half_duplex;
+    }
+    return s_has_saved_crsf_link_mode;
+}
+
 // =================================================================================
 // ⭐ NVS 存储功能 (必须写在被调用之前)
 // =================================================================================
@@ -393,18 +405,22 @@ void save_settings_to_nvs(void) {
     if (err == ESP_OK) {
         esp_err_t err_cal = nvs_set_blob(my_handle, "cal_data", limit, sizeof(limit));
         esp_err_t err_mode = nvs_set_u8(my_handle, "sim_mode", (uint8_t)current_sim_mode);
-        
+        esp_err_t err_crsf = nvs_set_u8(my_handle, "crsf_half", s_saved_crsf_half_duplex ? 1 : 0);
 
-        if (err_cal == ESP_OK && err_mode == ESP_OK) {
+        if (err_cal == ESP_OK && err_mode == ESP_OK && err_crsf == ESP_OK) {
             esp_err_t err_commit = nvs_commit(my_handle);
             if (err_commit == ESP_OK) {
-                ESP_LOGI(TAG, "💾 校准数据和模式已永久保存到 Flash (NVS)！");
+                ESP_LOGI(
+                    TAG,
+                    "💾 校准/模式/链路已保存: sim=%d wire=%s",
+                    (int)current_sim_mode,
+                    s_saved_crsf_half_duplex ? "single" : "dual");
             } else {
                 ESP_LOGE(TAG, "❌ NVS commit 失败");
             }
         } else {
-            ESP_LOGE(TAG, "❌ 保存失败: cal=%s, mode=%s",
-                     esp_err_to_name(err_cal), esp_err_to_name(err_mode));
+            ESP_LOGE(TAG, "❌ 保存失败: cal=%s, mode=%s, crsf=%s",
+                     esp_err_to_name(err_cal), esp_err_to_name(err_mode), esp_err_to_name(err_crsf));
         }
 
         nvs_close(my_handle);
@@ -421,7 +437,8 @@ void load_settings_from_nvs() {
         size_t required_size = sizeof(limit);
         esp_err_t err_cal = nvs_get_blob(my_handle, "cal_data", limit, &required_size);
         esp_err_t err_mode = nvs_get_u8(my_handle, "sim_mode", (uint8_t*)&current_sim_mode);
-       
+        uint8_t crsf_half = 0;
+        esp_err_t err_crsf = nvs_get_u8(my_handle, "crsf_half", &crsf_half);
 
         if (err_cal == ESP_OK) {
             ESP_LOGI(TAG, "📂 从 Flash 成功加载校准数据！");
@@ -436,8 +453,21 @@ void load_settings_from_nvs() {
             ESP_LOGI(TAG, "🆕 未找到模式数据，使用默认 HID 模式。");
         }
 
+        if (err_crsf == ESP_OK && (crsf_half == 0 || crsf_half == 1)) {
+            s_saved_crsf_half_duplex = (crsf_half == 1);
+            s_has_saved_crsf_link_mode = true;
+            ESP_LOGI(TAG, "📂 从 Flash 成功加载 CRSF 链路: %s", s_saved_crsf_half_duplex ? "single" : "dual");
+        } else {
+            s_saved_crsf_half_duplex = false;
+            s_has_saved_crsf_link_mode = false;
+            ESP_LOGI(TAG, "🆕 未找到 CRSF 链路配置，使用默认 dual。");
+        }
+
         nvs_close(my_handle);
-    } 
+    } else {
+        s_saved_crsf_half_duplex = false;
+        s_has_saved_crsf_link_mode = false;
+    }
 }
 
 // =================================================================================
@@ -577,6 +607,29 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 build_crsf_status_payload(status_buf, sizeof(status_buf));
                 ws_send_text(req, status_buf);
                 ESP_LOGI(TAG, "已响应 CRSF_REFRESH，等待菜单重载完成后下发新快照");
+            }
+            else if (strcmp(text, "CRSF_SNAPSHOT") == 0) {
+                ws_send_crsf_snapshot(req);
+            }
+            else if (strncmp(text, "CRSF_LINK:", 10) == 0) {
+                const char *mode = text + 10;
+                if (strcasecmp(mode, "SINGLE") == 0) {
+                    ESP_LOGW(TAG, "网页命令 link: 切换为单线模式");
+                    crsf_set_link_mode(true);
+                    s_saved_crsf_half_duplex = true;
+                    s_has_saved_crsf_link_mode = true;
+                    save_settings_to_nvs();
+                    ws_send_crsf_snapshot(req);
+                } else if (strcasecmp(mode, "DUAL") == 0) {
+                    ESP_LOGW(TAG, "网页命令 link: 切换为双线模式");
+                    crsf_set_link_mode(false);
+                    s_saved_crsf_half_duplex = false;
+                    s_has_saved_crsf_link_mode = true;
+                    save_settings_to_nvs();
+                    ws_send_crsf_snapshot(req);
+                } else {
+                    ESP_LOGW(TAG, "非法 CRSF_LINK 指令: %s", text);
+                }
             }
             else if (strncmp(text, "CRSF_WRITE:", 11) == 0) {
                 int param_id = -1;

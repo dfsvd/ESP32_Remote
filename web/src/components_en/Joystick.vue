@@ -38,8 +38,6 @@ const knobPositionStyle = computed(() => {
   }
   
   // Calculate percentage (50% is center)
-  // Max travel is 50px in a 150px base (radius 75px)
-  // The dist version uses 50/150*100 = 33.33% travel
   const maxTravel = (50 / 150) * 100; 
   const left = 50 + (finalX / 100) * maxTravel;
   const top = 50 - (finalY / 100) * maxTravel;

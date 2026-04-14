@@ -40,8 +40,39 @@ static uint32_t s_last_manual_ping_ms = 0;
 static volatile bool s_force_ping_requested = false;
 static volatile bool s_force_menu_reload_requested = false;
 static char s_last_device_name[64] = {0};
+static bool s_active_invert = false;
+static uint32_t s_last_invert_toggle_ms = 0;
+static uint32_t s_last_probe_log_ms = 0;
+static uint32_t s_last_rx_byte_ms = 0;
+static uint32_t s_rx_bytes_total = 0;
+static uint32_t s_crc_ok_frames = 0;
+static uint32_t s_crc_fail_frames = 0;
+static uint32_t s_last_rc_frame_ms = 0;
 
 static uint8_t crsf_crc8(const uint8_t *data, size_t len);
+static void crsf_apply_uart_inversion(bool invert);
+static void crsf_uart_write(const uint8_t *data, size_t len);
+static void crsf_reset_runtime_state(void);
+
+static void crsf_apply_uart_inversion(bool invert)
+{
+    uart_set_line_inverse(
+        s_cfg.uart_port,
+        invert ? (UART_SIGNAL_TXD_INV | UART_SIGNAL_RXD_INV) : 0
+    );
+    s_active_invert = invert;
+}
+
+static void crsf_uart_write(const uint8_t *data, size_t len)
+{
+    if (!data || len == 0) {
+        return;
+    }
+    uart_write_bytes(s_cfg.uart_port, (const char *)data, len);
+    if (s_cfg.half_duplex) {
+        uart_wait_tx_done(s_cfg.uart_port, pdMS_TO_TICKS(5));
+    }
+}
 
 static void crsf_send_ping_frame(uint8_t dest_addr) {
     uint8_t frame[6];
@@ -51,7 +82,7 @@ static void crsf_send_ping_frame(uint8_t dest_addr) {
     frame[3] = CRSF_ADDRESS_TX_MODULE;
     frame[4] = CRSF_ADDRESS_RADIO;
     frame[5] = crsf_crc8(&frame[2], 3);
-    uart_write_bytes(s_cfg.uart_port, frame, sizeof(frame));
+    crsf_uart_write(frame, sizeof(frame));
 }
 
 static uint8_t crsf_crc8(const uint8_t *data, size_t len) {
@@ -66,6 +97,7 @@ static uint8_t crsf_crc8(const uint8_t *data, size_t len) {
 }
 
 crsf_state_t* crsf_get_state(void) { return &s_state; }
+bool crsf_is_half_duplex(void) { return s_cfg.half_duplex; }
 
 void crsf_set_channel(uint8_t channel_idx, uint16_t value_us) {
     if (channel_idx >= 16) return;
@@ -98,6 +130,63 @@ static void reset_param_request_state(void) {
     s_current_req_chunk = 0;
     s_waiting_param_resp = false;
     s_current_param_data_len = 0;
+}
+
+static void crsf_reset_runtime_state(void)
+{
+    s_state.is_ready = false;
+    s_state.is_linked = false;
+    s_state.rssi = 0;
+    s_state.lq = 0;
+    s_state.snr = 0;
+    s_state.total_params = 0;
+    s_state.loaded_params = 0;
+    memset(s_state.device_name, 0, sizeof(s_state.device_name));
+    memset(s_state.menu, 0, sizeof(s_state.menu));
+    memset(s_last_device_name, 0, sizeof(s_last_device_name));
+
+    s_target_addr = CRSF_ADDRESS_TX_MODULE;
+    s_current_req_id = 1;
+    reset_param_request_state();
+    s_force_menu_reload_requested = false;
+    s_force_ping_requested = true;
+    s_last_link_time_ms = 0;
+    s_last_rc_frame_ms = 0;
+}
+
+void crsf_set_link_mode(bool half_duplex)
+{
+    if (s_cfg.half_duplex == half_duplex) {
+        return;
+    }
+
+    s_cfg.half_duplex = half_duplex;
+    if (s_cfg.half_duplex) {
+        uart_set_pin(s_cfg.uart_port, s_cfg.tx_pin, s_cfg.tx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        uart_set_mode(s_cfg.uart_port, UART_MODE_RS485_HALF_DUPLEX);
+        crsf_apply_uart_inversion(s_cfg.invert_signal);
+    } else {
+        uart_set_mode(s_cfg.uart_port, UART_MODE_UART);
+        uart_set_pin(s_cfg.uart_port, s_cfg.tx_pin, s_cfg.rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        crsf_apply_uart_inversion(false);
+    }
+
+    s_last_invert_toggle_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    s_last_probe_log_ms = s_last_invert_toggle_ms;
+    s_last_rx_byte_ms = s_last_invert_toggle_ms;
+    s_rx_bytes_total = 0;
+    s_crc_ok_frames = 0;
+    s_crc_fail_frames = 0;
+    crsf_reset_runtime_state();
+
+    ESP_LOGW(
+        TAG,
+        "CRSF 链路模式已切换: %s (tx=%d rx=%d invert=%d)",
+        s_cfg.half_duplex ? "single-wire" : "dual-wire",
+        s_cfg.tx_pin,
+        s_cfg.half_duplex ? s_cfg.tx_pin : s_cfg.rx_pin,
+        s_active_invert ? 1 : 0
+    );
 }
 
 static uint8_t count_loaded_params(void) {
@@ -178,7 +267,7 @@ static void internal_req_param(uint8_t param_index, uint8_t chunk_index) {
     frame[3] = s_target_addr; frame[4] = CRSF_ADDRESS_RADIO;
     frame[5] = param_index;   frame[6] = chunk_index; 
     frame[7] = crsf_crc8(&frame[2], 5); 
-    uart_write_bytes(s_cfg.uart_port, frame, sizeof(frame));
+    crsf_uart_write(frame, sizeof(frame));
 }
 
 void crsf_write_menu_value(uint8_t param_id, uint8_t new_value) {
@@ -187,7 +276,7 @@ void crsf_write_menu_value(uint8_t param_id, uint8_t new_value) {
     frame[3] = s_target_addr; frame[4] = CRSF_ADDRESS_RADIO;
     frame[5] = param_id;      frame[6] = new_value;
     frame[7] = crsf_crc8(&frame[2], 5);
-    uart_write_bytes(s_cfg.uart_port, frame, sizeof(frame));
+    crsf_uart_write(frame, sizeof(frame));
 }
 
 static void crsf_tx_task(void *arg) {
@@ -199,25 +288,52 @@ static void crsf_tx_task(void *arg) {
         
         if (!s_state.is_ready) {
             crsf_send_ping_frame(CRSF_ADDRESS_TX_MODULE);
+            if (s_cfg.half_duplex) {
+                if (now_ms - s_last_probe_log_ms >= 2000U) {
+                    s_last_probe_log_ms = now_ms;
+                    ESP_LOGI(
+                        TAG,
+                        "单线探测中: invert=%d rx_bytes=%lu crc_ok=%lu crc_fail=%lu",
+                        s_active_invert ? 1 : 0,
+                        (unsigned long)s_rx_bytes_total,
+                        (unsigned long)s_crc_ok_frames,
+                        (unsigned long)s_crc_fail_frames
+                    );
+                }
+
+                if (now_ms - s_last_rx_byte_ms >= 1800U &&
+                    now_ms - s_last_invert_toggle_ms >= 3000U) {
+                    bool next_invert = !s_active_invert;
+                    crsf_apply_uart_inversion(next_invert);
+                    s_last_invert_toggle_ms = now_ms;
+                    ESP_LOGW(TAG, "单线无回包，自动切换反相为: %d", next_invert ? 1 : 0);
+                }
+            }
             vTaskDelay(pdMS_TO_TICKS(1000));
         } else {
             if (s_force_ping_requested) {
                 crsf_send_ping_frame(s_target_addr);
                 s_force_ping_requested = false;
             }
-            // 通道发送
-            frame[0] = s_target_addr; frame[1] = 24; frame[2] = CRSF_FRAMETYPE_RC_CHANNELS; 
-            uint32_t bit_buffer = 0; uint8_t bits_in_buffer = 0; size_t out_index = 3;
-            for (int i = 0; i < 16; ++i) {
-                bit_buffer |= (s_channels_11bit[i] & 0x07FF) << bits_in_buffer; 
-                bits_in_buffer += 11;
-                while (bits_in_buffer >= 8) {
-                    frame[out_index++] = (uint8_t)(bit_buffer & 0xFF);
-                    bit_buffer >>= 8; bits_in_buffer -= 8;
+            bool menu_loading = (s_state.total_params > 0 && s_current_req_id <= s_state.total_params);
+            uint32_t rc_period_ms = (s_cfg.half_duplex && menu_loading) ? 120U : 20U;
+
+            if (now_ms - s_last_rc_frame_ms >= rc_period_ms) {
+                // 通道发送
+                frame[0] = s_target_addr; frame[1] = 24; frame[2] = CRSF_FRAMETYPE_RC_CHANNELS;
+                uint32_t bit_buffer = 0; uint8_t bits_in_buffer = 0; size_t out_index = 3;
+                for (int i = 0; i < 16; ++i) {
+                    bit_buffer |= (s_channels_11bit[i] & 0x07FF) << bits_in_buffer;
+                    bits_in_buffer += 11;
+                    while (bits_in_buffer >= 8) {
+                        frame[out_index++] = (uint8_t)(bit_buffer & 0xFF);
+                        bit_buffer >>= 8; bits_in_buffer -= 8;
+                    }
                 }
+                frame[25] = crsf_crc8(&frame[2], 23);
+                crsf_uart_write(frame, 26);
+                s_last_rc_frame_ms = now_ms;
             }
-            frame[25] = crsf_crc8(&frame[2], 23); 
-            uart_write_bytes(s_cfg.uart_port, frame, 26);
 
             // 真正的阻塞加载逻辑
             if (s_state.total_params > 0 && s_current_req_id <= s_state.total_params) {
@@ -252,6 +368,10 @@ static void crsf_rx_task(void *arg) {
     int rx_state = 0; uint8_t frame_len = 0, frame_idx = 0;
     while (1) {
         int len = uart_read_bytes(s_cfg.uart_port, rx_buf, sizeof(rx_buf), pdMS_TO_TICKS(10));
+        if (len > 0) {
+            s_last_rx_byte_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+            s_rx_bytes_total += (uint32_t)len;
+        }
         for (int i = 0; i < len; i++) {
             uint8_t b = rx_buf[i];
             switch (rx_state) {
@@ -266,6 +386,7 @@ static void crsf_rx_task(void *arg) {
                 case 2: frame[frame_idx++] = b;
                     if (frame_idx == frame_len + 2) { 
                         if (crsf_crc8(&frame[2], frame_len - 1) == frame[frame_len + 1]) {
+                            s_crc_ok_frames++;
                             uint8_t type = frame[2]; uint8_t *payload = &frame[3];
                             if (type == CRSF_FRAMETYPE_LINK_STAT) {
                                 s_last_link_time_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -379,6 +500,8 @@ static void crsf_rx_task(void *arg) {
                                     }
                                 }
                             }
+                        } else {
+                            s_crc_fail_frames++;
                         }
                         rx_state = 0;
                     }
@@ -396,15 +519,35 @@ void crsf_init(const crsf_config_t *config) {
     if (s_cfg.task_core_id < 0) s_cfg.task_core_id = CRSF_DEFAULT_TASK_CORE;
     memset(&s_state, 0, sizeof(crsf_state_t));
     memset(s_last_device_name, 0, sizeof(s_last_device_name));
+    s_active_invert = false;
+    s_last_invert_toggle_ms = 0;
+    s_last_probe_log_ms = 0;
+    s_last_rx_byte_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    s_rx_bytes_total = 0;
+    s_crc_ok_frames = 0;
+    s_crc_fail_frames = 0;
+    s_last_rc_frame_ms = 0;
     for (int i = 0; i < 16; ++i) {
         s_channels_11bit[i] = 992;
     }
     const uart_config_t u_cfg = { .baud_rate = s_cfg.baud_rate, .data_bits = UART_DATA_8_BITS, .parity = UART_PARITY_DISABLE, .stop_bits = UART_STOP_BITS_1, .flow_ctrl = UART_HW_FLOWCTRL_DISABLE, .source_clk = UART_SCLK_DEFAULT };
     uart_driver_install(s_cfg.uart_port, 1024, 1024, 0, NULL, 0);
     uart_param_config(s_cfg.uart_port, &u_cfg);
-    uart_set_pin(s_cfg.uart_port, s_cfg.tx_pin, s_cfg.rx_pin, -1, -1);
-    ESP_LOGI(TAG, "CRSF init: uart=%d tx=%d rx=%d baud=%lu prio=%d core=%d",
+    if (s_cfg.half_duplex) {
+        // In single-wire mode we map TX/RX to one pin and rely on UART half-duplex arbitration.
+        uart_set_pin(s_cfg.uart_port, s_cfg.tx_pin, s_cfg.tx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    } else {
+        uart_set_pin(s_cfg.uart_port, s_cfg.tx_pin, s_cfg.rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    }
+    crsf_apply_uart_inversion(s_cfg.invert_signal);
+    if (s_cfg.half_duplex) {
+        uart_set_mode(s_cfg.uart_port, UART_MODE_RS485_HALF_DUPLEX);
+    }
+    crsf_reset_runtime_state();
+    ESP_LOGI(TAG, "CRSF init: uart=%d tx=%d rx=%d mode=%s invert=%d baud=%lu prio=%d core=%d",
              (int)s_cfg.uart_port, s_cfg.tx_pin, s_cfg.rx_pin,
+             s_cfg.half_duplex ? "single-wire" : "dual-wire",
+             s_cfg.invert_signal ? 1 : 0,
              (unsigned long)s_cfg.baud_rate, s_cfg.task_priority, s_cfg.task_core_id);
     xTaskCreatePinnedToCore(crsf_rx_task, "crsf_rx", 4096, NULL, s_cfg.task_priority + 1, NULL, s_cfg.task_core_id);
     xTaskCreatePinnedToCore(crsf_tx_task, "crsf_tx", 4096, NULL, s_cfg.task_priority, NULL, s_cfg.task_core_id);
