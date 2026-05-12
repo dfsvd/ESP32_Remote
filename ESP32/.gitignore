@@ -1,3 +1,15 @@
+# 编译产物
 build/
+sdkconfig
+sdkconfig.old
+sdkconfig.defaults.old
+
+# 自动下载的组件库（这是产生你刚才那些警告的根源）
+managed_components/
+
+# 编译器缓存
 .cache/
 .claude/
+
+# 编辑器配置
+.vscode/

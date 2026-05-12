@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git archive:*)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "Bash(git clone:*)"
+    ]
+  }
+}
