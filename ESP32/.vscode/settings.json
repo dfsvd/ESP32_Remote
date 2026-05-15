@@ -1,5 +1,11 @@
 {
-    "idf.currentSetup": "D:/Program/Development/Espressif/frameworks/esp-idf-v5.5.2/",
-    "idf.portWin": "COM8",
-    "idf.flashType": "UART"
+  "idf.currentSetup": "D:/Program/Development/Espressif/frameworks/esp-idf-v5.5.2/",
+  "idf.portWin": "COM5",
+  "idf.flashType": "UART",
+  "clangd.path": "D:\\Program\\Development\\Espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=d:\\UserData\\Desktop\\tusb_hid_2+ble\\tusb_hid_2+ble\\tusb_hid\\ESP32\\build"
+  ]
 }
