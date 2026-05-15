@@ -1,177 +1,177 @@
 <template>
-  <div class="grid grid-cols-1 lg:grid-cols-[280px_minmax(0,1fr)] w-full min-h-screen bg-black">
-    <!-- Sidebar -->
-    <aside class="relative lg:sticky top-0 grid content-start gap-5 lg:gap-6 h-auto lg:min-h-screen p-4 lg:p-7 box-border border-b lg:border-b-0 lg:border-r border-white/10 bg-gradient-to-b from-white/5 to-transparent backdrop-blur-md z-10">
-      <!-- Navigation -->
-      <nav class="grid grid-cols-2 lg:grid-cols-1 gap-2.5 mt-0 lg:mt-2">
-        <button 
-          v-for="nav in navItems" 
-          :key="nav.id"
+  <div class="min-h-screen bg-black text-darwin-ink flex flex-col">
+    <!-- ========== Top Nav Bar ========== -->
+    <header class="sticky top-0 z-50 flex items-center h-14 px-4 border-b border-white/10 bg-black/90 backdrop-blur-md">
+      <!-- Left: Icon -->
+      <div class="flex items-center gap-2 mr-6 shrink-0">
+        <img :src="logoUrl" class="h-7 w-auto" alt="logo" />
+      </div>
+
+      <!-- Center: Nav Tabs -->
+      <nav class="flex items-center gap-1">
+        <button
+          v-for="tab in navItems"
+          :key="tab.id"
           type="button"
-          @click="currentTab = nav.id"
-          :class="['px-4 py-3.5 text-center border border-white/5 rounded-[18px] bg-darwin-panel/80 text-darwin-ink cursor-pointer transition-all duration-200 hover:-translate-y-px', { 'border-darwin-amber/50 bg-gradient-to-b from-darwin-amber/20 to-darwin-panel shadow-lg': currentTab === nav.id }]"
+          @click="currentTab = tab.id"
+          :class="['px-4 py-1.5 text-sm font-bold rounded-full transition-all', currentTab === tab.id ? 'bg-darwin-amber/20 text-darwin-amber' : 'text-darwin-muted hover:text-darwin-ink']"
         >
-          <span class="text-base font-bold">{{ nav.label }}</span>
+          {{ tab.label }}
         </button>
       </nav>
 
-      <!-- Connection & Global Status -->
-      <section class="grid grid-cols-3 lg:grid-cols-1 gap-3">
-        <article 
-          v-for="st in globalStatus" 
-          :key="st.label"
-          :class="['p-2.5 lg:p-3.5 border border-white/5 rounded-2xl bg-darwin-panel text-center lg:text-left', { 'border-darwin-amber/30': st.accent }]"
-        >
-          <span class="text-darwin-muted uppercase tracking-widest text-[0.68rem] lg:text-xs block mb-0.5">{{ st.label }}</span>
-          <strong :class="['text-[1rem] lg:text-[1.05rem] leading-tight', { 'text-darwin-amber': st.accent }]">{{ st.value }}</strong>
-        </article>
-      </section>
+      <!-- Spacer -->
+      <div class="flex-1"></div>
 
-      <!-- Language & Actions -->
-      <div class="grid grid-cols-2 lg:grid-cols-1 gap-2.5 lg:gap-3 mt-auto">
-        <select 
-          :value="currentLang" 
-          @change="changeLanguage"
-          class="w-full px-2.5 py-3 font-bold border border-white/10 rounded-full bg-darwin-panel text-darwin-ink h-full outline-none"
-        >
-          <option value="zh">中文</option>
-          <option value="en">English</option>
-        </select>
-        <button 
-          type="button"
-          @click="saveCalibration"
-          class="w-full px-2.5 py-3 font-bold rounded-full bg-gradient-to-br from-darwin-amber to-darwin-orange text-black shadow-md"
-        >
-          {{ t.saveCalibration }}
-        </button>
-        <button 
-          type="button"
-          @click="refreshCrsf"
-          class="col-span-2 lg:col-span-1 w-full px-2.5 py-3 font-bold border border-white/10 rounded-full bg-darwin-panel text-darwin-ink"
-        >
-          {{ t.refreshCrsf }}
-        </button>
-        <div class="col-span-2 lg:col-span-1 grid grid-cols-2 gap-2.5">
+      <!-- Right: Connection Status + Lang -->
+      <div class="flex items-center gap-3">
+        <!-- Connection Status -->
+        <div class="flex items-center gap-1.5 text-xs">
+          <span class="inline-block w-2 h-2 rounded-full" :class="isConnected ? 'bg-green-500' : 'bg-red-500'"></span>
+          <span class="text-darwin-muted">{{ isConnected ? t.online : t.offline }}</span>
+        </div>
+
+        <!-- Language Switch -->
+        <div class="flex items-center border border-white/10 rounded-full overflow-hidden text-xs">
           <button
             type="button"
-            @click="setLinkWireMode('dual')"
-            :disabled="isSwitchingLinkMode"
-            :class="['w-full px-2.5 py-3 font-bold border rounded-full transition-all', linkWireMode === 'dual' ? 'border-darwin-amber/60 bg-gradient-to-br from-darwin-amber to-darwin-orange text-black' : 'border-white/10 bg-darwin-panel text-darwin-ink']"
-          >
-            {{ t.dualWire }}
-          </button>
+            @click="changeLanguage('zh')"
+            :class="['px-2.5 py-1 font-bold transition-all', currentLang === 'zh' ? 'bg-darwin-amber text-black' : 'text-darwin-muted']"
+          >中</button>
           <button
             type="button"
-            @click="setLinkWireMode('single')"
-            :disabled="isSwitchingLinkMode"
-            :class="['w-full px-2.5 py-3 font-bold border rounded-full transition-all', linkWireMode === 'single' ? 'border-darwin-amber/60 bg-gradient-to-br from-darwin-amber to-darwin-orange text-black' : 'border-white/10 bg-darwin-panel text-darwin-ink']"
-          >
-            {{ t.singleWire }}
-          </button>
+            @click="changeLanguage('en')"
+            :class="['px-2.5 py-1 font-bold transition-all', currentLang === 'en' ? 'bg-darwin-amber text-black' : 'text-darwin-muted']"
+          >EN</button>
         </div>
       </div>
-    </aside>
+    </header>
 
-    <!-- Main Content -->
-    <main class="grid content-start gap-6 p-4 lg:p-7 box-border min-w-0">
-      <!-- Tabs Content -->
-      <section v-if="currentTab === 'controls'" class="grid gap-5">
-        <!-- Top Status Bar & Mode Switch -->
-        <section class="p-5 lg:p-[18px_20px] rounded-[22px] border border-white/10 bg-darwin-panel shadow-xl bg-[radial-gradient(circle_at_top_left,rgba(245,166,35,0.1),transparent_34%),linear-gradient(180deg,rgba(45,45,45,0.9),rgba(35,35,35,0.9))]">
-          <div class="grid lg:flex gap-3.5">
-            <!-- Mode Switch -->
-            <div class="flex justify-center p-1 border border-darwin-amber/20 rounded-full bg-white/5 h-fit">
-              <button 
-                v-for="mode in [{id: 0, l: 'HID'}, {id: 1, l: 'XBOX'}]" 
-                :key="mode.id"
-                type="button"
-                @click="simMode = mode.id"
-                :class="['min-w-[92px] px-4 py-[11px] rounded-full text-darwin-muted font-bold transition-all', { 'bg-gradient-to-br from-darwin-amber to-darwin-orange text-black shadow-md': simMode === mode.id }]"
-              >
-                {{ mode.l }}
-              </button>
+    <!-- ========== Main Content ========== -->
+    <main class="flex-1 p-4 lg:p-6 max-w-6xl w-full mx-auto box-border">
+      <!-- ===== Tab: Dashboard ===== -->
+      <section v-if="currentTab === 'dashboard'" class="grid gap-5">
+        <!-- Device Info Cards -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <article class="p-4 rounded-2xl border border-white/10 bg-darwin-panel">
+            <span class="text-darwin-muted text-[0.7rem] uppercase tracking-widest block mb-1">{{ t.connection }}</span>
+            <div class="flex items-center gap-2">
+              <span class="inline-block w-2.5 h-2.5 rounded-full" :class="isConnected ? 'bg-green-500' : 'bg-red-500'"></span>
+              <strong class="text-base" :class="isConnected ? 'text-green-400' : 'text-red-400'">{{ isConnected ? t.online : t.offline }}</strong>
             </div>
-            <!-- Status Cards -->
-            <div class="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-3.5 mt-3 lg:mt-0">
-              <article class="px-4 py-3.5 border border-white/10 rounded-[20px] bg-white/5">
-                <span class="text-darwin-muted text-[0.82rem] uppercase tracking-widest block mb-1">{{ t.statusRealtime }}</span>
-                <strong class="text-[1.15rem] text-white block">{{ activeChannelsCount }}/8 Active</strong>
-                <small class="text-darwin-muted">{{ channelRange.min }} ~ {{ channelRange.max }}</small>
-              </article>
-              <article class="px-4 py-3.5 border border-white/10 rounded-[20px] bg-white/5">
-                <span class="text-darwin-muted text-[0.82rem] uppercase tracking-widest block mb-1">{{ t.statusLink }}</span>
-                <strong class="text-[1.15rem] text-white block">{{ crsfStatus.isLinked ? t.linked : t.unlinked }}</strong>
-                <small class="text-darwin-muted">RSSI {{ crsfStatus.rssi ?? '--' }} · LQ {{ crsfStatus.lq ?? '--' }}</small>
-              </article>
-            </div>
-          </div>
-        </section>
+          </article>
 
-        <!-- Joystick & Channels -->
-        <section class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <!-- Stick View -->
-          <article class="p-6 rounded-[22px] border border-white/10 bg-darwin-panel shadow-lg">
-            <h4 class="m-0 mb-4 text-darwin-amber text-[11px] font-bold uppercase tracking-widest">{{ t.stickView }}</h4>
-            <div class="grid grid-cols-2 gap-3 justify-items-center">
+          <article class="p-4 rounded-2xl border border-white/10 bg-darwin-panel">
+            <span class="text-darwin-muted text-[0.7rem] uppercase tracking-widest block mb-1">{{ t.mode }}</span>
+            <strong class="text-base text-darwin-amber">{{ simMode === 1 ? 'XBOX' : 'HID' }}</strong>
+          </article>
+
+          <article class="p-4 rounded-2xl border border-white/10 bg-darwin-panel">
+            <span class="text-darwin-muted text-[0.7rem] uppercase tracking-widest block mb-1">CRSF</span>
+            <strong class="text-base" :class="crsfStatus.isLinked ? 'text-green-400' : 'text-darwin-muted'">
+              {{ crsfStatus.isLinked ? t.linked : t.unlinked }}
+            </strong>
+          </article>
+
+          <article class="p-4 rounded-2xl border border-white/10 bg-darwin-panel">
+            <span class="text-darwin-muted text-[0.7rem] uppercase tracking-widest block mb-1">{{ t.signal }}</span>
+            <strong class="text-base text-darwin-ink">
+              <template v-if="crsfStatus.isLinked">
+                RSSI {{ crsfStatus.rssi ?? '--' }} · LQ {{ crsfStatus.lq ?? '--' }}
+              </template>
+              <span v-else class="text-darwin-muted">--</span>
+            </strong>
+          </article>
+        </div>
+
+        <!-- Joystick + Main Channels -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <!-- Joystick Section -->
+          <article class="p-5 rounded-2xl border border-white/10 bg-darwin-panel">
+            <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ t.stickView }}</h3>
+            <div class="grid grid-cols-2 gap-4 justify-items-center">
               <Joystick :x="leftStick.x" :y="leftStick.y" :label="t.leftStick" />
               <Joystick :x="rightStick.x" :y="rightStick.y" :label="t.rightStick" />
             </div>
           </article>
-          <!-- Primary Channels -->
-          <article class="p-6 rounded-[22px] border border-white/10 bg-darwin-panel shadow-lg">
-            <h4 class="m-0 mb-4 text-darwin-amber text-[11px] font-bold uppercase tracking-widest">{{ t.primaryChannels }}</h4>
+
+          <!-- Channel Values Overview -->
+          <article class="p-5 rounded-2xl border border-white/10 bg-darwin-panel">
+            <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ t.channelValues }}</h3>
             <div class="grid grid-cols-2 gap-3">
-              <div v-for="ch in channels.slice(0, 4)" :key="ch.id" class="p-4 border border-white/10 rounded-[20px] bg-white/5">
-                <span class="text-darwin-muted block mb-1">CH{{ ch.id }}</span>
-                <strong class="text-[1.4rem] text-white block">{{ ch.mappedValue }}</strong>
+              <div v-for="ch in channels.slice(0, 8)" :key="ch.id" class="flex items-center justify-between p-3 border border-white/5 rounded-xl bg-white/5">
+                <span class="text-darwin-muted text-xs font-bold">CH{{ ch.id }}</span>
+                <div class="text-right">
+                  <strong class="text-sm text-white block">{{ ch.mappedValue }}</strong>
+                  <span class="text-[0.6rem] text-darwin-muted">{{ percentLabel(ch.mappedValue) }}</span>
+                </div>
               </div>
             </div>
           </article>
-        </section>
-
-        <!-- Calibration Panel -->
-        <section class="p-6 rounded-[22px] border border-white/10 bg-darwin-panel">
-          <h4 class="m-0 mb-5 text-darwin-amber text-[11px] font-bold uppercase tracking-widest">{{ t.channelCalibration }}</h4>
-          <!-- Auto Calibration -->
-          <div class="mb-5 p-4 border border-darwin-amber/20 rounded-[20px] bg-white/5">
-            <strong class="text-white block mb-3">{{ t.autoCalibration }}</strong>
-            <p class="text-darwin-muted text-sm mb-4">{{ t.autoCalibrationDesc }}</p>
-            <button @click="showCalibrationModal = true" class="px-5 py-2.5 rounded-full bg-gradient-to-br from-darwin-amber to-darwin-orange text-black font-bold">
-              {{ t.startAutoCalibration }}
-            </button>
-          </div>
-          <!-- 16 Channel Sliders -->
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
-            <AuxChannelSlider 
-              v-for="ch in visibleChannels" 
-              :key="ch.id"
-              :channel-id="ch.id"
-              :mapped-value="ch.mappedValue"
-              v-model:raw-value="ch.rawValue"
-              :cal="ch.cal"
-              :t-raw-label="currentLang === 'zh' ? '原始值' : 'RAW'"
-            />
-          </div>
-        </section>
+        </div>
       </section>
 
-      <!-- CRSF Configurer -->
-      <section v-else>
-        <CrsfConfiguratorPanel 
-          :menus="crsfMenus" 
-          :status="crsfStatus" 
-          :loading="isCrsfLoading" 
-          :t="t"
-          @refresh="refreshCrsf"
-          @bind="handleCrsfBind"
-          @command="handleCrsfCommand"
-          @select-change="handleCrsfSelectChange"
-        />
+      <!-- ===== Tab: Configuration ===== -->
+      <section v-if="currentTab === 'config'" class="grid grid-cols-1 lg:grid-cols-[180px_minmax(0,1fr)] gap-5">
+        <!-- Config Sidebar Nav -->
+        <nav class="flex lg:flex-col gap-2 lg:sticky lg:top-20 lg:self-start">
+          <button
+            v-for="sub in configNavItems"
+            :key="sub.id"
+            type="button"
+            @click="configSubTab = sub.id"
+            :class="['px-4 py-2.5 text-sm font-bold text-left rounded-xl transition-all whitespace-nowrap lg:whitespace-normal', configSubTab === sub.id ? 'bg-darwin-amber/20 text-darwin-amber border border-darwin-amber/30' : 'text-darwin-muted border border-transparent hover:border-white/10']"
+          >
+            {{ sub.label }}
+          </button>
+        </nav>
+
+        <!-- Config Content -->
+        <div>
+          <ConfigChannelProps
+            v-if="configSubTab === 'props'"
+            :channels="visibleChannels"
+            :t="configT"
+            t-raw-label="RAW"
+            @calibrate="showCalibrationModal = true"
+            @save="saveCalibration(t)"
+          />
+
+          <ConfigChannelMapping
+            v-if="configSubTab === 'mapping'"
+            :mappings="channelMapping"
+            :switch-options="availableSwitches"
+            :t="mappingT"
+            @write="writeChannelMapping"
+            @reset="resetChannelMapping"
+            @update:mapping="updateChannelMapping"
+          />
+
+          <ConfigStickMode
+            v-if="configSubTab === 'stick'"
+            :stick-mode="stickMode"
+            :t="stickT"
+            @update:stickMode="setStickMode"
+            @calibrate="showCalibrationModal = true"
+          />
+
+          <CrsfConfiguratorPanel
+            v-if="configSubTab === 'crsf'"
+            :menus="crsfMenus"
+            :status="crsfStatus"
+            :loading="isCrsfLoading"
+            :t="t"
+            @refresh="refreshCrsf"
+            @bind="handleCrsfBind"
+            @command="handleCrsfCommand"
+            @select-change="handleCrsfSelectChange"
+          />
+        </div>
       </section>
     </main>
 
-    <!-- WebSocket Singleton -->
-    <WebSocketConnection 
+    <!-- WebSocket -->
+    <WebSocketConnection
       ref="ws"
       @data="onWsData"
       @status="isConnected = $event"
@@ -190,79 +190,75 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
-import { useRouter } from 'vue-router';
-import Joystick from '../components_en/Joystick.vue';
-import AuxChannelSlider from '../components_en/AuxChannelSlider.vue';
-import CrsfConfiguratorPanel from '../components_en/CrsfConfiguratorPanel.vue';
-import WebSocketConnection from '../components/WebSocketConnection.vue';
-import CalibrationModal from '../components/CalibrationModal.vue';
+import { ref, computed } from 'vue'
+import { useRCState } from '../composables/useRCState.js'
+import Joystick from '../components_en/Joystick.vue'
+import WebSocketConnection from '../components/WebSocketConnection.vue'
+import CalibrationModal from '../components/CalibrationModal.vue'
+import CrsfConfiguratorPanel from '../components/CrsfConfiguratorPanel.vue'
+import ConfigChannelProps from '../components/ConfigChannelProps.vue'
+import ConfigChannelMapping from '../components/ConfigChannelMapping.vue'
+import ConfigStickMode from '../components/ConfigStickMode.vue'
 
-// --- Constants & I18n ---
-const SIM_MODE_HID = 0;
-const SIM_MODE_XBOX = 1;
+const {
+  ws, isConnected, currentTab, configSubTab, currentLang, simMode,
+  showCalibrationModal, stickMode, channelMapping, availableSwitches,
+  isCrsfLoading, crsfStatus, channels, crsfMenus,
+  leftStick, rightStick, visibleChannels,
+  changeLanguage, saveCalibration, setStickMode,
+  updateChannelMapping, resetChannelMapping, writeChannelMapping,
+  refreshCrsf, handleCrsfBind, handleCrsfCommand, handleCrsfSelectChange,
+  onCalibrationResult, onWsData, requestCalibration,
+} = useRCState()
 
-const translations = {
-  en: {
-    controls: 'RC Panel',
-    crsf: 'CRSF Menu',
-    eyebrowControls: 'Terminal',
-    titleControls: 'Joystick, Channels & Calibration',
-    eyebrowCrsf: 'Configuration',
-    titleCrsf: 'Receiver Config & Command Entry',
-    langLabel: 'English',
-    saveCalibration: 'Save Calibration',
-    refreshCrsf: 'Refresh CRSF',
-    linkWireMode: 'CRSF Wire',
-    dualWire: 'Dual Wire',
-    singleWire: 'Single Wire',
-    refresh: 'Refresh',
-    connection: 'Connection',
-    online: 'Online',
-    offline: 'Offline',
-    mode: 'Mode',
-    crsfLabel: 'CRSF',
-    statusRealtime: 'Realtime Status',
-    statusLink: 'Link Snapshot',
-    linked: 'Linked',
-    unlinked: 'Unlinked',
-    stickView: 'Stick View',
-    leftStick: 'Left Stick',
-    rightStick: 'Right Stick',
-    primaryChannels: 'Primary Channels',
-    channelCalibration: 'Channel Calibration',
-    autoCalibration: 'Stick Calibration',
-    autoCalibrationDesc: 'Like a game controller — push and rotate the stick to calibrate.',
-    startAutoCalibration: 'Start Calibration',
-    cancel: 'Cancel',
-    notConnectedAlert: 'Not connected to device, cannot save.',
-    savedAlert: 'Mode and calibration data sent.',
-    calibrationResultAlert: 'Auto-calibration results written to CH1-CH4. Click "Save Calibration" to sync with device.',
-    processing: 'Processing...',
-    startBind: 'Start Bind',
-    link: 'Link',
-    signal: 'Signal',
-    menuSync: 'Menu Sync',
-    readOnly: 'Read Only',
-    command: 'Cmd',
-    runCommand: 'Run Cmd',
-    execute: 'Execute',
-    folder: 'Folder',
-    select: 'Select',
-    info: 'Info',
-    text: 'Text',
-    general: 'General'
-  }
-};
+currentLang.value = 'en'
 
-const t = translations.en;
+const t = {
+  online: 'Online',
+  offline: 'Offline',
+  connection: 'Connection',
+  mode: 'Mode',
+  linked: 'Linked',
+  unlinked: 'Unlinked',
+  signal: 'Signal',
+  stickView: 'Stick View',
+  leftStick: 'Left Stick',
+  rightStick: 'Right Stick',
+  channelValues: 'Channel Values',
+  notConnectedAlert: 'Not connected, cannot save.',
+  savedAlert: 'Mode and calibration data sent.',
+}
+
+const configT = {
+  autoCalibration: 'Auto Calibrate',
+  saveCalibration: 'Save Calibration',
+}
+
+const mappingT = {
+  write: 'Write',
+  reset: 'Reset',
+  columnChannel: 'Channel',
+  columnDefault: 'Default',
+  columnCurrent: 'Current',
+}
+
+const stickT = {
+  stickMode: 'Stick Mode',
+  mode2: 'Mode 2',
+  mode1: 'Mode 1',
+  mode2Desc: 'Left: Yaw+Throttle / Right: Roll+Pitch',
+  mode1Desc: 'Left: Pitch+Yaw / Right: Roll+Throttle',
+  leftStick: 'Left Stick',
+  rightStick: 'Right Stick',
+  calibrate: 'Calibrate Sticks',
+}
 
 const calT = {
-  calDetect: 'Gently nudge the stick to calibrate',
+  calDetect: 'Gently nudge the stick',
   calDetectHint: 'Waiting for detection...',
-  calPushMax: 'Push the stick to the top',
-  calPushMaxHint: 'Release to proceed to next step',
-  calRotate: 'Rotate the stick clockwise 3 full turns',
+  calPushMax: 'Push the stick to max',
+  calPushMaxHint: 'Release to proceed',
+  calRotate: 'Rotate the stick clockwise 3 times',
   calRotateHint: 'Rotations',
   calRotateUnit: '',
   calComplete: 'Calibration complete!',
@@ -270,333 +266,22 @@ const calT = {
   calAxisLeftY: 'Left Y (Throttle)',
   calAxisRightX: 'Right X (Roll)',
   calAxisRightY: 'Right Y (Pitch)'
-};
+}
 
-// --- State ---
-const ws = ref(null);
-const wsBuffer = ref('');
-const isConnected = ref(false);
-const currentTab = ref('controls');
-const router = useRouter();
-const currentLang = ref('en');
-
-const simMode = ref(SIM_MODE_HID);
-const isCrsfLoading = ref(false);
-const linkWireMode = ref('dual');
-const isSwitchingLinkMode = ref(false);
-
-const crsfStatus = ref({
-  isReady: true,
-  isLinked: false,
-  rssi: -91,
-  lq: 100,
-  loadedParams: 20,
-  totalParams: 20,
-  deviceLabel: ''
-});
-
-const isInitialSynced = ref(false);
-const showCalibrationModal = ref(false);
-
-const channels = ref(Array.from({ length: 16 }, (_, i) => ({
-  id: i + 1,
-  mappedValue: 1500,
-  rawValue: 2048,
-  cal: { min: 1000, mid: 1500, max: 2000 }
-})));
-
-// --- UI Helpers ---
 const navItems = computed(() => [
-  { id: 'controls', label: t.controls },
-  { id: 'crsf', label: t.crsf }
-]);
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'config', label: 'Config' }
+])
 
-const globalStatus = computed(() => [
-  { label: t.connection, value: isConnected.value ? t.online : t.offline, accent: isConnected.value },
-  { label: t.mode, value: simMode.value === SIM_MODE_XBOX ? 'XBOX' : 'HID', accent: true },
-  { label: t.crsfLabel, value: `${crsfStatus.value.loadedParams ?? 0}/${crsfStatus.value.totalParams ?? 0}`, accent: crsfStatus.value.isReady }
-]);
+const configNavItems = computed(() => [
+  { id: 'props', label: 'Channel Props' },
+  { id: 'mapping', label: 'Mapping' },
+  { id: 'stick', label: 'Stick Mode' },
+  { id: 'crsf', label: 'CRSF' },
+])
 
-const leftStick = computed(() => ({
-  x: (channels.value[3].mappedValue - 1500) / 5,
-  y: (channels.value[2].mappedValue - 1500) / 5
-}));
-
-const rightStick = computed(() => ({
-  x: (channels.value[0].mappedValue - 1500) / 5,
-  y: (channels.value[1].mappedValue - 1500) / 5
-}));
-
-const channelRange = computed(() => {
-  const vals = channels.value.map(c => c.mappedValue);
-  return { min: Math.min(...vals), max: Math.max(...vals) };
-});
-
-const visibleChannels = computed(() => {
-  return channels.value.filter(c => c.id <= 4 || (c.id >= 9 && c.id <= 12));
-});
-
-const activeChannelsCount = computed(() => {
-  return visibleChannels.value.filter(c => c.mappedValue !== 1500 || c.rawValue !== 2048).length;
-});
-
-// --- CRSF Translation Map ---
-const crsfLabelMap = {
-  "Packet Rate": { zh: "发包速率", en: "Packet Rate" },
-  "Telem Ratio": { zh: "回传比例", en: "Telem Ratio" },
-  "Switch Mode": { zh: "开关模式", en: "Switch Mode" },
-  "Link Mode": { zh: "链路模式", en: "Link Mode" },
-  "Model Match": { zh: "模型匹配", en: "Model Match" },
-  "TX Power (100mW)": { zh: "发射功率（100mW）", en: "TX Power (100mW)" },
-  "Max Power": { zh: "最大发射功率", en: "Max Power" },
-  "Dynamic": { zh: "动态功率", en: "Dynamic" },
-  "VTX Administrator": { zh: "图传设置", en: "VTX Administrator" },
-  "Band": { zh: "频段", en: "Band" },
-  "Channel": { zh: "频道", en: "Channel" },
-  "Pwr Lvl": { zh: "功率等级", en: "Pwr Lvl" },
-  "Pitmode": { zh: "陷波模式", en: "Pitmode" },
-  "Send VTx": { zh: "发送图传设置", en: "Send VTx" },
-  "WiFi Connectivity": { zh: "WiFi 连接", en: "WiFi Connectivity" },
-  "Enable WiFi": { zh: "开启 WiFi", en: "Enable WiFi" },
-  "Enable Rx WiFi": { zh: "开启接收机 WiFi", en: "Enable Rx WiFi" },
-  "Bind": { zh: "对频", en: "Bind" },
-  "Bad/Good": { zh: "坏包/好包", en: "Bad/Good" }
-};
-
-function translateCrsfLabel(label) {
-  if (!label) return label;
-  const entry = crsfLabelMap[label];
-  return (entry && entry[currentLang.value]) || label;
-}
-
-function normalizeCrsfItem(item) {
-  return {
-    id: Number(item.id),
-    parentId: Number(item.parentId ?? item.parent_id ?? 0),
-    type: item.type ?? item.kind ?? 0,
-    name: translateCrsfLabel(item.name),
-    value: Number.isFinite(Number(item.value)) ? Number(item.value) : 0,
-    options: item.options ?? item.content ?? ''
-  };
-}
-
-const MOCK_CRSF_DATA = [
-  {id:1,parentId:0,type:9,name:`Packet Rate`,value:3,options:`50Hz(-115dBm);100Hz Full(-112dBm);150Hz(-112dBm);250Hz(-108dBm);333Hz Full(-105dBm);500Hz(-105dBm);D250(-104dBm);D500(-104dBm);F500(-104dBm)`},
-  {id:2,parentId:0,type:9,name:`Telem Ratio`,value:0,options:`Std;Off;1:128;1:64;1:32;1:16;1:8;1:4;1:2;Race`},
-  {id:3,parentId:0,type:9,name:`Switch Mode`,value:0,options:`Wide;Hybrid`},
-  {id:4,parentId:0,type:9,name:`Link Mode`,value:0,options:`Normal;MAVLink`},
-  {id:5,parentId:0,type:9,name:`Model Match`,value:0,options:`Off;On`},
-  {id:6,parentId:0,type:11,name:`TX Power (100mW)`,value:0,options:``},
-  {id:7,parentId:6,type:9,name:`Max Power`,value:1,options:`10;100`},
-  {id:8,parentId:6,type:9,name:`Dynamic`,value:0,options:`Off;Dyn;AUX9;AUX10;AUX11;AUX12`},
-  {id:9,parentId:0,type:11,name:`VTX Administrator`,value:0,options:``},
-  {id:10,parentId:9,type:9,name:`Band`,value:0,options:`Off;A;B;E;F;R;L`},
-  {id:11,parentId:9,type:0,name:`Channel`,value:0,options:`1-8`},
-  {id:12,parentId:9,type:9,name:`Pwr Lvl`,value:0,options:`-;1;2;3;4;5;6;7;8`},
-  {id:13,parentId:9,type:9,name:`Pitmode`,value:0,options:`Off;On;AUX1:Lo;AUX1:Hi;AUX2:Lo;AUX2:Hi;AUX3:Lo;AUX3:Hi;AUX4:Lo;AUX4:Hi;AUX5:Lo;AUX5:Hi`},
-  {id:14,parentId:9,type:13,name:`Send VTx`,value:0,options:``},
-  {id:15,parentId:0,type:11,name:`WiFi Connectivity`,value:0,options:``},
-  {id:16,parentId:15,type:13,name:`Enable WiFi`,value:0,options:``},
-  {id:17,parentId:15,type:13,name:`Enable Rx WiFi`,value:0,options:``},
-  {id:18,parentId:0,type:13,name:`Bind`,value:0,options:``},
-  {id:19,parentId:0,type:12,name:`Bad/Good`,value:0,options:`0/1`},
-  {id:20,parentId:0,type:12,name:`ver.unknown ISM2G4`,value:0,options:`40555e`}
-];
-
-const crsfMenus = ref(MOCK_CRSF_DATA.map(normalizeCrsfItem));
-
-// --- Methods ---
-function changeLanguage(event) {
-  const lang = event.target.value;
-  localStorage.setItem('user_lang', lang);
-  router.push('/' + lang);
-}
-
-function saveCalibration() {
-  if (!ws.value) {
-    window.alert(t.notConnectedAlert);
-    return;
-  }
-  ws.value.sendData(`M:${simMode.value}`);
-  const calCmd = channels.value
-    .map(c => `${c.id},${c.cal.min},${c.cal.mid},${c.cal.max}`)
-    .join(';');
-  ws.value.sendData(`C:${calCmd}`);
-  window.alert(t.savedAlert);
-}
-
-function refreshCrsf() {
-  isCrsfLoading.value = true;
-  ws.value?.sendData('CRSF_REFRESH');
-}
-
-function setLinkWireMode(mode) {
-  if (!ws.value || isSwitchingLinkMode.value || linkWireMode.value === mode) {
-    return;
-  }
-  isSwitchingLinkMode.value = true;
-  linkWireMode.value = mode;
-  ws.value.sendData(`CRSF_LINK:${mode === 'single' ? 'SINGLE' : 'DUAL'}`);
-  window.setTimeout(() => {
-    ws.value?.sendData('CRSF_SNAPSHOT');
-    isSwitchingLinkMode.value = false;
-  }, 450);
-}
-
-function handleCrsfBind(item) {
-  isCrsfLoading.value = true;
-  ws.value?.sendData(`CRSF_BIND:${item.id}`);
-  setTimeout(() => isCrsfLoading.value = false, 600);
-}
-
-function handleCrsfCommand(item) {
-  isCrsfLoading.value = true;
-  ws.value?.sendData(`CRSF_COMMAND:${item.id}`);
-  setTimeout(() => isCrsfLoading.value = false, 600);
-}
-
-function handleCrsfSelectChange(node) {
-  crsfMenus.value = crsfMenus.value.map(m => m.id === node.id ? { ...m, value: node.value } : m);
-  ws.value?.sendData(`CRSF_WRITE:${node.id}:${node.value}`);
-}
-
-// --- Calibration ---
-function onCalibrationResult(results) {
-  Object.entries(results).forEach(([idx, cal]) => {
-    const ch = channels.value[parseInt(idx)];
-    if (ch) {
-      ch.cal.min = cal.min;
-      ch.cal.mid = cal.mid;
-      ch.cal.max = cal.max;
-    }
-  });
-  window.alert(t.calibrationResultAlert);
-}
-
-// --- WebSocket Handlers ---
-function onWsData(data) {
-  wsBuffer.value += data;
-  const lines = wsBuffer.value.split(/\r?\n/);
-  wsBuffer.value = lines.pop() ?? '';
-
-  lines.map(l => l.trim()).filter(Boolean).forEach(line => {
-    if (line.startsWith('CRSF_SNAPSHOT:')) {
-      try {
-        const payload = JSON.parse(line.slice('CRSF_SNAPSHOT:'.length));
-        updateCrsfState(payload);
-      } catch (e) { console.error('CRSF_SNAPSHOT parse error', e); }
-      return;
-    }
-    if (line.startsWith('CRSF_STATUS:')) {
-      try {
-        const payload = JSON.parse(line.slice('CRSF_STATUS:'.length));
-        updateCrsfState({ status: payload });
-      } catch (e) { console.error('CRSF_STATUS parse error', e); }
-      return;
-    }
-    if (line.startsWith('CRSF_MENU:')) {
-      try {
-        const payload = JSON.parse(line.slice('CRSF_MENU:'.length));
-        updateCrsfState({ menus: payload });
-      } catch (e) { console.error('CRSF_MENU parse error', e); }
-      return;
-    }
-
-    if (line.startsWith('{')) {
-      try {
-        const msg = JSON.parse(line);
-        if (msg.type === 'crsf_snapshot' || msg.type === 'crsf_status' || msg.type === 'crsf_menu') {
-          updateCrsfState(msg.status ? msg : { status: msg, menus: msg.menus });
-        }
-      } catch (e) { console.error('JSON parse error', e); }
-      return;
-    }
-    if (line.startsWith('C:')) {
-      parseCalibration(line);
-      return;
-    }
-    if (!parseModeLine(line)) {
-      parseChannelsLine(line);
-    }
-  });
-}
-
-function updateCrsfState(data) {
-  if (data.status) {
-    const s = data.status;
-    crsfStatus.value = {
-      ...crsfStatus.value,
-      isReady: s.isReady ?? s.is_ready ?? crsfStatus.value.isReady,
-      isLinked: s.isLinked ?? s.is_linked ?? crsfStatus.value.isLinked,
-      rssi: s.rssi ?? crsfStatus.value.rssi,
-      lq: s.lq ?? crsfStatus.value.lq,
-      loadedParams: s.loadedParams ?? s.loaded_params ?? crsfStatus.value.loadedParams,
-      totalParams: s.totalParams ?? s.total_params ?? crsfStatus.value.totalParams
-    };
-    const wireMode = (s.wireMode ?? s.wire_mode ?? '').toString().toLowerCase();
-    if (wireMode === 'single' || wireMode === 'dual') {
-      linkWireMode.value = wireMode;
-    }
-  }
-  if (Array.isArray(data.menus)) {
-    crsfMenus.value = data.menus.map(normalizeCrsfItem).filter(m => m.id > 0);
-  }
-  isInitialSynced.value = true;
-  if (crsfStatus.value.totalParams > 0 && crsfStatus.value.loadedParams >= crsfStatus.value.totalParams) {
-    isCrsfLoading.value = false;
-  }
-}
-
-function parseCalibration(line) {
-  line.slice(2).split(';').forEach(segment => {
-    const parts = segment.split(',').map(p => parseInt(p.trim(), 10));
-    if (parts.length < 4) return;
-    const [id, min, mid, max] = parts;
-    const ch = channels.value.find(c => c.id === id);
-    if (ch && !isNaN(min) && !isNaN(mid) && !isNaN(max)) {
-      ch.cal.min = min;
-      ch.cal.mid = mid;
-      ch.cal.max = max;
-    }
-  });
-}
-
-function parseModeLine(line) {
-  const prefix = ['M:', 'MODE:', 'SIM_MODE:'].find(p => line.startsWith(p));
-  if (!prefix) return false;
-  const m = parseInt(line.slice(prefix.length).trim(), 10);
-  if (m === SIM_MODE_HID || m === SIM_MODE_XBOX) {
-    simMode.value = m;
-  }
-  return true;
-}
-
-function parseChannelsLine(line) {
-  const values = line.split(',').map(v => v.trim()).filter(Boolean);
-  if (values.length === channels.value.length) {
-    values.forEach((v, i) => {
-      const ch = channels.value[i];
-      if (!ch) return;
-      const parts = v.split(':');
-      if (parts.length === 2) {
-        const mapped = parseInt(parts[0], 10);
-        const raw = parseInt(parts[1], 10);
-        if (!isNaN(mapped) && !isNaN(raw)) {
-          ch.mappedValue = mapped;
-          ch.rawValue = raw;
-        }
-      } else {
-        const raw = parseInt(v, 10);
-        if (!isNaN(raw)) {
-          ch.rawValue = raw;
-          if (raw >= 800 && raw <= 2200) ch.mappedValue = raw;
-        }
-      }
-    });
-  }
-}
-
-function requestCalibration() {
-  ws.value?.sendData('CRSF_SNAPSHOT');
+function percentLabel(val) {
+  const pct = Math.round((val - 1500) / 5)
+  return (pct > 0 ? '+' : '') + pct + '%'
 }
 </script>

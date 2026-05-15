@@ -3,7 +3,7 @@
     <div v-if="visible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70" @click.self="onCancel">
       <div class="bg-[#1a1a1a] border border-white/10 rounded-3xl p-8 w-[420px] select-none">
         <!-- Step Progress -->
-        <div class="flex items-center gap-2 mb-6">
+        <div class="flex items-center justify-center gap-2 mb-6">
           <div v-for="(s, i) in steps" :key="i" class="flex items-center gap-2">
             <div :class="['w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors', i <= stepIndex ? 'bg-darwin-amber text-black' : 'bg-white/10 text-darwin-muted']">{{ i + 1 }}</div>
             <div v-if="i < steps.length - 1" :class="['w-8 h-px transition-colors', i < stepIndex ? 'bg-darwin-amber' : 'bg-white/10']"></div>

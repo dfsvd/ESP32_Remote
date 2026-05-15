@@ -140,14 +140,10 @@ static void build_ble_gamepad_report(const fpv_joystick_report_t *joy, ble_gamep
     report->rz = ble_clamp_channel(joy->yaw);
     report->buttons = 0;
 
-    if (joy->sw1 > 1500) report->buttons |= (1 << 0);
-    if (joy->sw2 > 1500) report->buttons |= (1 << 1);
-    if (joy->sw3 > 1500) report->buttons |= (1 << 2);
-    if (joy->sw4 > 1500) report->buttons |= (1 << 3);
-    if (joy->sw5 > 1500) report->buttons |= (1 << 4);
-    if (joy->sw6 > 1500) report->buttons |= (1 << 5);
-    if (joy->sw7 > 1500) report->buttons |= (1 << 6);
-    if (joy->sw8 > 1500) report->buttons |= (1 << 7);
+    if (joy->aux1 > 1500) report->buttons |= (1 << 0);
+    if (joy->aux2 > 1500) report->buttons |= (1 << 1);
+    if (joy->aux3 > 1500) report->buttons |= (1 << 2);
+    if (joy->aux4 > 1500) report->buttons |= (1 << 3);
 }
 
 static bool ble_link_is_secured(const struct ble_gap_conn_desc *desc)
