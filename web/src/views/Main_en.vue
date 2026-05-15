@@ -95,7 +95,7 @@
             <div class="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-3.5 mt-3 lg:mt-0">
               <article class="px-4 py-3.5 border border-white/10 rounded-[20px] bg-white/5">
                 <span class="text-darwin-muted text-[0.82rem] uppercase tracking-widest block mb-1">{{ t.statusRealtime }}</span>
-                <strong class="text-[1.15rem] text-white block">{{ activeChannelsCount }}/16 Active</strong>
+                <strong class="text-[1.15rem] text-white block">{{ activeChannelsCount }}/8 Active</strong>
                 <small class="text-darwin-muted">{{ channelRange.min }} ~ {{ channelRange.max }}</small>
               </article>
               <article class="px-4 py-3.5 border border-white/10 rounded-[20px] bg-white/5">
@@ -135,38 +135,15 @@
           <!-- Auto Calibration -->
           <div class="mb-5 p-4 border border-darwin-amber/20 rounded-[20px] bg-white/5">
             <strong class="text-white block mb-3">{{ t.autoCalibration }}</strong>
-            <div class="flex flex-wrap gap-2.5 mb-4">
-              <button 
-                v-if="calibrationMode === 'idle'" 
-                @click="startAutoCalibration" 
-                class="px-5 py-2.5 rounded-full border border-white/10 text-darwin-ink bg-white/5"
-              >
-                {{ t.startAutoCalibration }}
-              </button>
-              <template v-else>
-                <button @click="finishAutoCalibration" class="px-5 py-2.5 rounded-full bg-gradient-to-br from-darwin-amber to-darwin-orange text-black font-bold">
-                  {{ t.finishAutoCalibration }}
-                </button>
-                <button @click="cancelAutoCalibration" class="px-5 py-2.5 rounded-full border border-white/10 text-darwin-ink">
-                  {{ t.cancel }}
-                </button>
-              </template>
-            </div>
-            <!-- Auto Calib Visuals -->
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <div v-for="ch in channels.slice(0, 4)" :key="ch.id" class="p-3 border border-white/10 rounded-[15px] bg-white/5">
-                <span class="text-darwin-muted text-xs block mb-1">CH{{ ch.id }}</span>
-                <strong class="text-white block">{{ ch.rawValue }}</strong>
-                <small v-if="calibrationCaptures[ch.id]" class="text-darwin-muted text-[10px]">
-                  MIN {{ calibrationCaptures[ch.id].min }} · MAX {{ calibrationCaptures[ch.id].max }}
-                </small>
-              </div>
-            </div>
+            <p class="text-darwin-muted text-sm mb-4">{{ t.autoCalibrationDesc }}</p>
+            <button @click="showCalibrationModal = true" class="px-5 py-2.5 rounded-full bg-gradient-to-br from-darwin-amber to-darwin-orange text-black font-bold">
+              {{ t.startAutoCalibration }}
+            </button>
           </div>
           <!-- 16 Channel Sliders -->
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
             <AuxChannelSlider 
-              v-for="ch in channels" 
+              v-for="ch in visibleChannels" 
               :key="ch.id"
               :channel-id="ch.id"
               :mapped-value="ch.mappedValue"
@@ -200,16 +177,26 @@
       @status="isConnected = $event"
       @connected="requestCalibration"
     />
+
+    <!-- Calibration Modal -->
+    <CalibrationModal
+      :visible="showCalibrationModal"
+      :channels="channels"
+      :t="calT"
+      @close="showCalibrationModal = false"
+      @calibrate="onCalibrationResult"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import Joystick from '../components_en/Joystick.vue';
 import AuxChannelSlider from '../components_en/AuxChannelSlider.vue';
 import CrsfConfiguratorPanel from '../components_en/CrsfConfiguratorPanel.vue';
 import WebSocketConnection from '../components/WebSocketConnection.vue';
+import CalibrationModal from '../components/CalibrationModal.vue';
 
 // --- Constants & I18n ---
 const SIM_MODE_HID = 0;
@@ -244,9 +231,9 @@ const translations = {
     rightStick: 'Right Stick',
     primaryChannels: 'Primary Channels',
     channelCalibration: 'Channel Calibration',
-    autoCalibration: 'Primary Channel Auto-Calibration',
-    startAutoCalibration: 'Start Auto-Calibration',
-    finishAutoCalibration: 'Centered! Write Result',
+    autoCalibration: 'Stick Calibration',
+    autoCalibrationDesc: 'Like a game controller — push and rotate the stick to calibrate.',
+    startAutoCalibration: 'Start Calibration',
     cancel: 'Cancel',
     notConnectedAlert: 'Not connected to device, cannot save.',
     savedAlert: 'Mode and calibration data sent.',
@@ -269,6 +256,21 @@ const translations = {
 };
 
 const t = translations.en;
+
+const calT = {
+  calDetect: 'Gently nudge the stick to calibrate',
+  calDetectHint: 'Waiting for detection...',
+  calPushMax: 'Push the stick to the top',
+  calPushMaxHint: 'Release to proceed to next step',
+  calRotate: 'Rotate the stick clockwise 3 full turns',
+  calRotateHint: 'Rotations',
+  calRotateUnit: '',
+  calComplete: 'Calibration complete!',
+  calAxisLeftX: 'Left X (Yaw)',
+  calAxisLeftY: 'Left Y (Throttle)',
+  calAxisRightX: 'Right X (Roll)',
+  calAxisRightY: 'Right Y (Pitch)'
+};
 
 // --- State ---
 const ws = ref(null);
@@ -294,8 +296,7 @@ const crsfStatus = ref({
 });
 
 const isInitialSynced = ref(false);
-const calibrationMode = ref('idle');
-const calibrationCaptures = ref({});
+const showCalibrationModal = ref(false);
 
 const channels = ref(Array.from({ length: 16 }, (_, i) => ({
   id: i + 1,
@@ -331,8 +332,12 @@ const channelRange = computed(() => {
   return { min: Math.min(...vals), max: Math.max(...vals) };
 });
 
+const visibleChannels = computed(() => {
+  return channels.value.filter(c => c.id <= 4 || (c.id >= 9 && c.id <= 12));
+});
+
 const activeChannelsCount = computed(() => {
-  return channels.value.filter(c => c.mappedValue !== 1500 || c.rawValue !== 2048).length;
+  return visibleChannels.value.filter(c => c.mappedValue !== 1500 || c.rawValue !== 2048).length;
 });
 
 // --- CRSF Translation Map ---
@@ -455,40 +460,16 @@ function handleCrsfSelectChange(node) {
   ws.value?.sendData(`CRSF_WRITE:${node.id}:${node.value}`);
 }
 
-// --- Auto Calibration ---
-function startAutoCalibration() {
-  calibrationCaptures.value = Object.fromEntries(
-    channels.value.slice(0, 4).map(c => [c.id, { min: c.rawValue, max: c.rawValue }])
-  );
-  calibrationMode.value = 'capturing';
-}
-
-function cancelAutoCalibration() {
-  calibrationCaptures.value = {};
-  calibrationMode.value = 'idle';
-}
-
-function updateCaptures() {
-  if (calibrationMode.value !== 'capturing') return;
-  channels.value.slice(0, 4).forEach(c => {
-    const cap = calibrationCaptures.value[c.id];
-    if (cap) {
-      cap.min = Math.min(cap.min, c.rawValue);
-      cap.max = Math.max(cap.max, c.rawValue);
+// --- Calibration ---
+function onCalibrationResult(results) {
+  Object.entries(results).forEach(([idx, cal]) => {
+    const ch = channels.value[parseInt(idx)];
+    if (ch) {
+      ch.cal.min = cal.min;
+      ch.cal.mid = cal.mid;
+      ch.cal.max = cal.max;
     }
   });
-}
-
-function finishAutoCalibration() {
-  if (calibrationMode.value !== 'capturing') return;
-  channels.value.slice(0, 4).forEach(c => {
-    const cap = calibrationCaptures.value[c.id];
-    if (!cap) return;
-    c.cal.min = Math.min(cap.min, cap.max);
-    c.cal.mid = c.rawValue;
-    c.cal.max = Math.max(cap.min, cap.max);
-  });
-  calibrationMode.value = 'idle';
   window.alert(t.calibrationResultAlert);
 }
 
@@ -612,7 +593,6 @@ function parseChannelsLine(line) {
         }
       }
     });
-    updateCaptures();
   }
 }
 
