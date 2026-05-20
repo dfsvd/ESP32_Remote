@@ -1,6 +1,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdio.h>
+#include <ctype.h>
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -23,7 +24,7 @@ static bool s_saved_crsf_half_duplex = false;
 static bool s_has_saved_crsf_link_mode = false;
 
 // =================================================================================
-// 快速 DNS 响应 — 收到查询立即回 NXDOMAIN，避免手机 DNS 超时卡住联网检测
+// 快速 DNS 响应 — 连通性检测域名→ESP32(204通过)，其他域名→NXDOMAIN(防止请求淹没)
 // =================================================================================
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -53,15 +54,68 @@ static void dns_server_task(void *pvParameters) {
                            (struct sockaddr *)&client_addr, &client_len);
         if (len < 12) continue;
 
-        // 原样复制 ID，设置 NXDOMAIN(3) + 回答数=0
-        buf[2] = 0x83;  // QR=1 + NXDOMAIN
-        buf[3] = 0x83;  //
-        buf[6] = 0; buf[7] = 0;
-        buf[8] = 0; buf[9] = 0;
-        buf[10] = 0; buf[11] = 0;
+        // 跳过问题名称 (不定长)，提取域名用于判断
+        int qname_len = 0;
+        while (len > 12 + qname_len && buf[12 + qname_len] != 0)
+            qname_len += buf[12 + qname_len] + 1;
+        qname_len++;
+        if (12 + qname_len + 4 > len) continue;
 
-        sendto(sock, buf, len, 0,
-               (struct sockaddr *)&client_addr, client_len);
+        // 只响应 A 记录查询
+        uint16_t qtype  = (buf[12 + qname_len] << 8) | buf[12 + qname_len + 1];
+        uint16_t qclass = (buf[12 + qname_len + 2] << 8) | buf[12 + qname_len + 3];
+        if (qtype != 1 || qclass != 1) continue;
+
+        // 判断是否是连通性检测域名
+        bool is_connectivity_check = false;
+        int src = 12;
+        char domain_buf[128];
+        int di = 0;
+        while (src < 12 + qname_len - 1 && di < 120) {
+            uint8_t label_len = buf[src];
+            if (label_len == 0) break;
+            for (uint8_t j = 0; j < label_len && di < 120; j++)
+                domain_buf[di++] = (char)tolower(buf[src + 1 + j]);
+            domain_buf[di++] = '.';
+            src += 1 + label_len;
+        }
+        if (di > 0) domain_buf[di - 1] = '\0';
+        if (strstr(domain_buf, "connectivitycheck") ||
+            strstr(domain_buf, "gstatic") ||
+            strstr(domain_buf, "google") ||
+            strstr(domain_buf, "miui") ||
+            strstr(domain_buf, "mi.com"))
+            is_connectivity_check = true;
+
+        if (is_connectivity_check) {
+            // 连通性检测 → 指向 ESP32，配合 /generate_204 返回 204
+            buf[2] = 0x81; buf[3] = 0x80;
+            buf[6] = 0; buf[7] = 1;
+            buf[8] = 0; buf[9] = 0;
+            buf[10] = 0; buf[11] = 0;
+
+            int off = 12 + qname_len + 4;
+            buf[off]     = 0xC0; buf[off + 1] = 0x0C;
+            buf[off + 2] = 0x00; buf[off + 3] = 0x01;
+            buf[off + 4] = 0x00; buf[off + 5] = 0x01;
+            buf[off + 6] = 0x00; buf[off + 7] = 0x00;
+            buf[off + 8] = 0x00; buf[off + 9] = 0x3C;
+            buf[off + 10] = 0x00; buf[off + 11] = 0x04;
+            buf[off + 12] = 192; buf[off + 13] = 168;
+            buf[off + 14] = 4;    buf[off + 15] = 1;
+
+            sendto(sock, buf, off + 16, 0,
+                   (struct sockaddr *)&client_addr, client_len);
+        } else {
+            // 其他域名 → NXDOMAIN，App 不会连接
+            buf[2] = 0x83; buf[3] = 0x83;
+            buf[6] = 0; buf[7] = 0;
+            buf[8] = 0; buf[9] = 0;
+            buf[10] = 0; buf[11] = 0;
+
+            sendto(sock, buf, len, 0,
+                   (struct sockaddr *)&client_addr, client_len);
+        }
     }
 
     close(sock);
@@ -843,14 +897,12 @@ static void ws_broadcast_task(void *arg)
     }
 }
 
-// Captive Portal 重定向 — 404 → HTTP 200 + auto redirect
-// 用 200 而非 302 可避免部分系统弹出"登录"横幅
-static esp_err_t captive_portal_handler(httpd_req_t *req, httpd_err_code_t err)
+// 404 → 204: 静默吃掉未知请求（App 后台请求不会重试）
+static esp_err_t catchall_204_handler(httpd_req_t *req, httpd_err_code_t err)
 {
     (void)err;
-    const char *html = "<html><head><meta http-equiv=\"refresh\" content=\"0; url=http://192.168.4.1/\"></head><body></body></html>";
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_send(req, html, strlen(html));
+    httpd_resp_set_status(req, "204 No Content");
+    httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
 
@@ -861,6 +913,7 @@ static void start_webserver(fpv_joystick_report_t *joy)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 10;
+    config.max_open_sockets = 7;
 
     ESP_LOGI(TAG, "启动 HTTP 服务器，端口: %d", config.server_port);
     if (httpd_start(&server, &config) == ESP_OK) {
@@ -907,8 +960,8 @@ static void start_webserver(fpv_joystick_report_t *joy)
         };
         httpd_register_uri_handler(server, &gen204_uri);
 
-        // Captive Portal 已关闭: 浏览器直接访问 192.168.4.1 即可
-        // httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_portal_handler);
+        // 404→204 静默处理所有未知请求
+        httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, catchall_204_handler);
 
         httpd_uri_t ws_uri = {
             .uri        = "/ws",
