@@ -18,6 +18,36 @@ export function useRCState() {
   const currentTab = ref('dashboard')
   const currentLang = ref('zh')
   const simMode = ref(SIM_MODE_HID)
+  const isDarkMode = ref(true)
+
+  // --- Theme ---
+  function initTheme() {
+    const saved = localStorage.getItem('theme')
+    if (saved === 'light') {
+      isDarkMode.value = false
+      document.documentElement.classList.remove('dark')
+    } else if (saved === 'dark') {
+      isDarkMode.value = true
+      document.documentElement.classList.add('dark')
+    } else {
+      isDarkMode.value = true
+      document.documentElement.classList.add('dark')
+    }
+  }
+
+  function toggleTheme() {
+    isDarkMode.value = !isDarkMode.value
+    if (isDarkMode.value) {
+      document.documentElement.classList.add('dark')
+      localStorage.setItem('theme', 'dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+      localStorage.setItem('theme', 'light')
+    }
+  }
+
+  // Initialize theme immediately
+  initTheme()
   const showCalibrationModal = ref(false)
   const configSubTab = ref('props') // 'props' | 'mapping' | 'stick'
   const stickMode = ref(STICK_MODE_2) // 默认美国手
@@ -378,6 +408,7 @@ export function useRCState() {
     currentTab,
     currentLang,
     simMode,
+    isDarkMode,
     showCalibrationModal,
     configSubTab,
     stickMode,
@@ -397,6 +428,7 @@ export function useRCState() {
     visibleChannels,
 
     // methods
+    toggleTheme,
     changeLanguage,
     saveCalibration,
     refreshCrsf,

@@ -12,6 +12,8 @@
 #include "rc_wf.h"
 #include "rc_usb.h"
 #include "rc_crsf.h"
+#include "logo_icon.h"
+#include "logo_horizontal.h"
 
 static const char *TAG = "RC_WIFI";
 static httpd_handle_t server = NULL;
@@ -19,6 +21,93 @@ static httpd_handle_t server = NULL;
 #define CRSF_MENU_BUF_SIZE   12288
 static bool s_saved_crsf_half_duplex = false;
 static bool s_has_saved_crsf_link_mode = false;
+
+// =================================================================================
+// Captive Portal DNS — 将所有域名解析到 ESP32 IP (192.168.4.1)
+// 设备连接 WiFi 后会自动弹出"登录网络"通知，点击即打开配置页面
+// =================================================================================
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#define DNS_PORT 53
+
+static void dns_server_task(void *pvParameters) {
+    struct sockaddr_in bind_addr = {
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+        .sin_family = AF_INET,
+        .sin_port = htons(DNS_PORT),
+    };
+
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "DNS socket 创建失败");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    if (bind(sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) != 0) {
+        ESP_LOGE(TAG, "DNS socket bind 失败 (port 53)");
+        close(sock);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    uint8_t buf[512];
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+
+    ESP_LOGI(TAG, "Captive Portal DNS 已启动");
+
+    while (1) {
+        int len = recvfrom(sock, buf, sizeof(buf), 0,
+                           (struct sockaddr *)&client_addr, &client_len);
+        if (len < 12) continue;
+
+        // 只处理标准查询 (QR=0, OPCODE=0)
+        uint16_t flags = (buf[2] << 8) | buf[3];
+        if ((flags & 0x7800) != 0) continue;
+
+        // 跳过问题名称 (不定长)
+        int qname_len = 0;
+        while (len > 12 + qname_len && buf[12 + qname_len] != 0)
+            qname_len += buf[12 + qname_len] + 1;
+        qname_len++;
+        if (12 + qname_len + 4 > len) continue;
+
+        // 只响应 A 记录查询
+        uint16_t qtype  = (buf[12 + qname_len] << 8) | buf[12 + qname_len + 1];
+        uint16_t qclass = (buf[12 + qname_len + 2] << 8) | buf[12 + qname_len + 3];
+        if (qtype != 1 || qclass != 1) continue;
+
+        // 构造 DNS 响应
+        // 1. 复制 ID + 设置响应标志 (0x8180)
+        buf[2] = 0x81;
+        buf[3] = 0x80;
+        // 2. 回答数 = 1
+        buf[6] = 0; buf[7] = 1;
+        buf[8] = 0; buf[9] = 0; // NSCOUNT
+        buf[10] = 0; buf[11] = 0; // ARCOUNT
+
+        // 3. 回答: 名称指针 (指向问题中的域名), 类型 A, CLASS IN, TTL 60s
+        int off = 12 + qname_len + 4;
+        buf[off]     = 0xC0;
+        buf[off + 1] = 0x0C;            // 名称指针
+        buf[off + 2] = 0x00; buf[off + 3] = 0x01; // TYPE A
+        buf[off + 4] = 0x00; buf[off + 5] = 0x01; // CLASS IN
+        buf[off + 6] = 0x00; buf[off + 7] = 0x00;
+        buf[off + 8] = 0x00; buf[off + 9] = 0x3C; // TTL = 60
+        buf[off + 10] = 0x00; buf[off + 11] = 0x04; // RDLENGTH = 4
+        buf[off + 12] = 192; buf[off + 13] = 168;
+        buf[off + 14] = 4;    buf[off + 15] = 1;    // 192.168.4.1
+
+        sendto(sock, buf, off + 16, 0,
+               (struct sockaddr *)&client_addr, client_len);
+    }
+
+    close(sock);
+    vTaskDelete(NULL);
+}
 
 // 1. 本地的 16 通道测试数组 (出厂默认值)
 extern channel_cal_t limit[16] ;
@@ -357,7 +446,11 @@ static void ws_broadcast_text(const char *payload)
 
     for (size_t i = 0; i < max_clients; ++i) {
         if (httpd_ws_get_fd_info(server, client_fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
-            httpd_ws_send_frame_async(server, client_fds[i], &ws_pkt);
+            esp_err_t ret = httpd_ws_send_frame_async(server, client_fds[i], &ws_pkt);
+            if (ret != ESP_OK) {
+                ESP_LOGD(TAG, "ws_broadcast_text 发送失败 fd=%d ret=%s",
+                         client_fds[i], esp_err_to_name(ret));
+            }
         }
     }
 }
@@ -478,6 +571,13 @@ static esp_err_t index_html_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     size_t html_size = (index_html_end - index_html_start);
     httpd_resp_send(req, (const char *)index_html_start, html_size);
+    return ESP_OK;
+}
+
+static esp_err_t favicon_handler(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "204 No Content");
+    httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
 
@@ -784,6 +884,17 @@ static void ws_broadcast_task(void *arg)
     }
 }
 
+// Captive Portal 重定向 — 404 → HTTP 200 + auto redirect
+// 用 200 而非 302 可避免部分系统弹出"登录"横幅
+static esp_err_t captive_portal_handler(httpd_req_t *req, httpd_err_code_t err)
+{
+    (void)err;
+    const char *html = "<html><head><meta http-equiv=\"refresh\" content=\"0; url=http://192.168.4.1/\"></head><body></body></html>";
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_send(req, html, strlen(html));
+    return ESP_OK;
+}
+
 // =================================================================================
 // HTTP 服务器与路由注册
 // =================================================================================
@@ -791,10 +902,10 @@ static void start_webserver(fpv_joystick_report_t *joy)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 10;
-    
+
     ESP_LOGI(TAG, "启动 HTTP 服务器，端口: %d", config.server_port);
     if (httpd_start(&server, &config) == ESP_OK) {
-        
+
         httpd_uri_t index_uri = {
             .uri       = "/",
             .method    = HTTP_GET,
@@ -802,7 +913,35 @@ static void start_webserver(fpv_joystick_report_t *joy)
             .user_ctx  = NULL
         };
         httpd_register_uri_handler(server, &index_uri);
-        
+
+        httpd_uri_t icon_uri = {
+            .uri       = "/logo-icon.png",
+            .method    = HTTP_GET,
+            .handler   = logo_icon_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &icon_uri);
+
+        httpd_uri_t horiz_uri = {
+            .uri       = "/logo-horizontal.png",
+            .method    = HTTP_GET,
+            .handler   = logo_horizontal_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &horiz_uri);
+
+        // favicon.ico — 浏览器自动请求，直接回 204 静默处理
+        httpd_uri_t favicon_uri = {
+            .uri       = "/favicon.ico",
+            .method    = HTTP_GET,
+            .handler   = favicon_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &favicon_uri);
+
+        // Captive Portal 已关闭: 浏览器直接访问 192.168.4.1 即可
+        // httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_portal_handler);
+
         httpd_uri_t ws_uri = {
             .uri        = "/ws",
             .method     = HTTP_GET,
@@ -847,6 +986,8 @@ void rc_wifi_server_init(fpv_joystick_report_t *joy)
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "WiFi AP 启动完成. SSID:%s", wifi_config.ap.ssid);
-    
+
+    xTaskCreatePinnedToCore(dns_server_task, "dns_captive", 3072, NULL, 3, NULL, 0);
+
     start_webserver(joy);
 }

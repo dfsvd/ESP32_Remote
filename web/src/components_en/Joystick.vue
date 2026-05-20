@@ -1,10 +1,10 @@
 <template>
   <div class="flex flex-col items-center gap-[0.35rem] md:gap-2">
     <!-- Joystick Base -->
-    <div class="relative w-[122px] h-[122px] md:w-[150px] md:h-[150px] border-2 border-[#444] rounded-full bg-black/20 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35),0_18px_36px_rgba(24,33,38,0.08)]">
+    <div class="relative w-[122px] h-[122px] md:w-[150px] md:h-[150px] border-2 border-[var(--theme-joystick-base-border)] rounded-full bg-[var(--theme-joystick-base-bg)] shadow-[inset_0_0_0_1px_var(--theme-joystick-inner-shadow),0_18px_36px_var(--theme-shadow-sm)]">
       <!-- Joystick Knob -->
-      <div 
-        class="absolute w-[40px] h-[40px] md:w-[50px] md:h-[50px] rounded-full transform -translate-x-1/2 -translate-y-1/2 border-2 border-white/90 shadow-[0_0_10px_rgba(245,166,35,0.7),0_18px_30px_rgba(245,166,35,0.18),inset_0_0_5px_rgba(255,255,255,0.5)]"
+      <div
+        class="absolute w-[40px] h-[40px] md:w-[50px] md:h-[50px] rounded-full transform -translate-x-1/2 -translate-y-1/2 border-2 border-[var(--theme-joystick-knob-border)] shadow-[0_0_10px_var(--theme-knob-shadow),0_18px_30px_rgba(245,166,35,0.18),inset_0_0_5px_rgba(255,255,255,0.5)]"
         :style="[knobPositionStyle, knobBackgroundStyle]"
       ></div>
     </div>

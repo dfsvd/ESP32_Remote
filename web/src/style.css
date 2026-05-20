@@ -2,9 +2,90 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --theme-bg: #F0F2F5;
+  --theme-bg-secondary: #FFFFFF;
+  --theme-panel: #FFFFFF;
+  --theme-panel-alt: #F8F9FA;
+  --theme-border: rgba(0,0,0,0.08);
+  --theme-border-light: rgba(0,0,0,0.04);
+  --theme-text: #1F2937;
+  --theme-text-muted: #6B7280;
+  --theme-header-bg: rgba(240,242,245,0.92);
+  --theme-bg-subtle: rgba(0,0,0,0.03);
+  --theme-bg-hover: rgba(0,0,0,0.05);
+  --theme-bg-active: rgba(0,0,0,0.08);
+  --theme-input-bg: #F3F4F6;
+  --theme-input-border: #D1D5DB;
+  --theme-input-text: #1F2937;
+  --theme-offline-text: #9CA3AF;
+  --theme-cmd-badge-bg: rgba(217,119,6,0.12);
+  --theme-cmd-badge-text: #B45309;
+  --theme-knob-shadow: rgba(245,166,35,0.6);
+  --theme-shadow-sm: rgba(0,0,0,0.06);
+  --theme-shadow-lg: rgba(0,0,0,0.12);
+  --theme-joystick-base-bg: rgba(0,0,0,0.03);
+  --theme-joystick-base-border: #D1D5DB;
+  --theme-joystick-knob-border: rgba(0,0,0,0.3);
+  --theme-joystick-inner-shadow: rgba(0,0,0,0.12);
+  --theme-crsf-gradient: radial-gradient(circle at top left, rgba(245,166,35,0.08), transparent 35%), radial-gradient(circle at top right, rgba(217,119,6,0.06), transparent 28%), linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,249,250,0.95));
+  --theme-crsf-shadow: 0 28px 80px rgba(0,0,0,0.08);
+  --theme-crsf-status-bg: #F8F9FA;
+  --theme-crsf-tree-bg: #F3F4F6;
+  --theme-crsf-item-bg: rgba(0,0,0,0.02);
+  --theme-panel-dim: rgba(0,0,0,0.03);
+  --theme-crsf-item-hover-shadow: 0 14px 26px rgba(0,0,0,0.08);
+  --theme-crsf-option-shadow: 0 14px 26px rgba(0,0,0,0.06);
+  --theme-stick-inactive-text: rgba(0,0,0,0.12);
+  --theme-svg-stroke: rgba(0,0,0,0.08);
+  --theme-svg-stroke-subtle: rgba(0,0,0,0.04);
+  --theme-svg-stroke-faint: rgba(0,0,0,0.06);
+}
+
+.dark {
+  --theme-bg: #18181B;
+  --theme-bg-secondary: #1f1f22;
+  --theme-panel: #27272A;
+  --theme-panel-alt: #1a1a1c;
+  --theme-border: rgba(255,255,255,0.1);
+  --theme-border-light: rgba(255,255,255,0.05);
+  --theme-text: #FAFAFA;
+  --theme-text-muted: #A1A1AA;
+  --theme-header-bg: rgba(0,0,0,0.9);
+  --theme-bg-subtle: rgba(255,255,255,0.05);
+  --theme-bg-hover: rgba(255,255,255,0.1);
+  --theme-bg-active: rgba(255,255,255,0.18);
+  --theme-input-bg: #333;
+  --theme-input-border: #555;
+  --theme-input-text: #f0f0f5;
+  --theme-offline-text: #8b6f5d;
+  --theme-cmd-badge-bg: rgba(203,122,47,0.2);
+  --theme-cmd-badge-text: #d97706;
+  --theme-knob-shadow: rgba(245,166,35,0.7);
+  --theme-shadow-sm: rgba(0,0,0,0.4);
+  --theme-shadow-lg: rgba(0,0,0,0.6);
+  --theme-joystick-base-bg: rgba(0,0,0,0.2);
+  --theme-joystick-base-border: #444;
+  --theme-joystick-knob-border: rgba(255,255,255,0.9);
+  --theme-joystick-inner-shadow: rgba(255,255,255,0.35);
+  --theme-crsf-gradient: radial-gradient(circle at top left, rgba(245,166,35,0.1), transparent 35%), radial-gradient(circle at top right, rgba(217,119,6,0.1), transparent 28%), linear-gradient(180deg, rgba(45,45,45,0.9), rgba(35,35,35,0.9));
+  --theme-crsf-shadow: 0 28px 80px rgba(0,0,0,0.4);
+  --theme-crsf-status-bg: #1f1f22;
+  --theme-crsf-tree-bg: #1a1a1c;
+  --theme-crsf-item-bg: rgba(255,255,255,0.05);
+  --theme-panel-dim: rgba(39,39,42,0.6);
+  --theme-crsf-item-hover-shadow: 0 14px 26px rgba(0,0,0,0.5);
+  --theme-crsf-option-shadow: 0 14px 26px rgba(0,0,0,0.4);
+  --theme-stick-inactive-text: rgba(255,255,255,0.15);
+  --theme-svg-stroke: rgba(255,255,255,0.12);
+  --theme-svg-stroke-subtle: rgba(255,255,255,0.04);
+  --theme-svg-stroke-faint: rgba(255,255,255,0.06);
+}
+
 @layer base {
   body {
-    @apply bg-darwin-bg text-darwin-ink antialiased bg-gradient-to-b from-[#303030] to-darwin-bg min-h-screen;
+    @apply bg-[var(--theme-bg)] text-[var(--theme-text)] antialiased min-h-screen;
     background-attachment: fixed;
+    background-image: linear-gradient(to bottom, var(--theme-panel-alt), var(--theme-bg));
   }
 }

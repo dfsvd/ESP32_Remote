@@ -1,10 +1,11 @@
 <template>
-  <div class="min-h-screen bg-black text-darwin-ink flex flex-col">
+  <div class="min-h-screen bg-[var(--theme-bg)] text-darwin-ink flex flex-col">
     <!-- ========== Top Nav Bar ========== -->
-    <header class="sticky top-0 z-50 flex items-center h-14 px-4 border-b border-white/10 bg-black/90 backdrop-blur-md">
-      <!-- Left: Icon -->
-      <div class="flex items-center gap-2 mr-6 shrink-0">
-        <img :src="logoUrl" class="h-7 w-auto" alt="logo" />
+    <header class="sticky top-0 z-50 flex items-center h-14 px-2 sm:px-4 border-b border-[var(--theme-border)] bg-[var(--theme-header-bg)] backdrop-blur-md">
+      <!-- Left: Logo -->
+      <div class="flex items-center gap-2 mr-3 sm:mr-6 shrink-0">
+        <img src="/logo-icon.png" class="h-7 w-auto sm:hidden" alt="logo" />
+        <img src="/logo-horizontal.png" class="hidden sm:block h-7 w-auto" alt="logo" />
       </div>
 
       <!-- Center: Nav Tabs -->
@@ -14,7 +15,7 @@
           :key="tab.id"
           type="button"
           @click="currentTab = tab.id"
-          :class="['px-4 py-1.5 text-sm font-bold rounded-full transition-all', currentTab === tab.id ? 'bg-darwin-amber/20 text-darwin-amber' : 'text-darwin-muted hover:text-darwin-ink']"
+          :class="['px-3 sm:px-4 py-1.5 text-sm font-bold rounded-full transition-all whitespace-nowrap', currentTab === tab.id ? 'bg-darwin-amber/20 text-darwin-amber' : 'text-darwin-muted hover:text-darwin-ink']"
         >
           {{ tab.label }}
         </button>
@@ -23,25 +24,35 @@
       <!-- Spacer -->
       <div class="flex-1"></div>
 
-      <!-- Right: Connection Status + Lang -->
-      <div class="flex items-center gap-3">
+      <!-- Right: Connection Status + Theme + Lang -->
+      <div class="flex items-center gap-1.5 sm:gap-3">
         <!-- Connection Status -->
         <div class="flex items-center gap-1.5 text-xs">
-          <span class="inline-block w-2 h-2 rounded-full" :class="isConnected ? 'bg-green-500' : 'bg-red-500'"></span>
-          <span class="text-darwin-muted">{{ isConnected ? t.online : t.offline }}</span>
+          <span class="inline-block w-2 h-2 rounded-full shrink-0" :class="isConnected ? 'bg-green-500' : 'bg-red-500'"></span>
+          <span class="text-darwin-muted hidden sm:inline">{{ isConnected ? t.online : t.offline }}</span>
         </div>
 
+        <!-- Theme Toggle -->
+        <button
+          type="button"
+          @click="toggleTheme"
+          class="w-7 h-7 flex items-center justify-center rounded-full text-sm transition-all hover:bg-[var(--theme-bg-hover)] text-darwin-muted hover:text-darwin-ink"
+          :title="isDarkMode ? 'Light Mode' : 'Dark Mode'"
+        >
+          {{ isDarkMode ? '☀' : '☾' }}
+        </button>
+
         <!-- Language Switch -->
-        <div class="flex items-center border border-white/10 rounded-full overflow-hidden text-xs">
+        <div class="flex items-center border border-[var(--theme-border)] rounded-full overflow-hidden text-xs">
           <button
             type="button"
             @click="changeLanguage('zh')"
-            :class="['px-2.5 py-1 font-bold transition-all', currentLang === 'zh' ? 'bg-darwin-amber text-black' : 'text-darwin-muted']"
+            :class="['px-2 sm:px-2.5 py-1 font-bold transition-all', currentLang === 'zh' ? 'bg-darwin-amber text-black' : 'text-darwin-muted']"
           >中</button>
           <button
             type="button"
             @click="changeLanguage('en')"
-            :class="['px-2.5 py-1 font-bold transition-all', currentLang === 'en' ? 'bg-darwin-amber text-black' : 'text-darwin-muted']"
+            :class="['px-2 sm:px-2.5 py-1 font-bold transition-all', currentLang === 'en' ? 'bg-darwin-amber text-black' : 'text-darwin-muted']"
           >EN</button>
         </div>
       </div>
@@ -53,7 +64,7 @@
       <section v-if="currentTab === 'dashboard'" class="grid gap-5">
         <!-- Device Info Cards -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <article class="p-4 rounded-2xl border border-white/10 bg-darwin-panel">
+          <article class="p-4 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
             <span class="text-darwin-muted text-[0.7rem] uppercase tracking-widest block mb-1">{{ t.connection }}</span>
             <div class="flex items-center gap-2">
               <span class="inline-block w-2.5 h-2.5 rounded-full" :class="isConnected ? 'bg-green-500' : 'bg-red-500'"></span>
@@ -61,19 +72,19 @@
             </div>
           </article>
 
-          <article class="p-4 rounded-2xl border border-white/10 bg-darwin-panel">
+          <article class="p-4 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
             <span class="text-darwin-muted text-[0.7rem] uppercase tracking-widest block mb-1">{{ t.mode }}</span>
             <strong class="text-base text-darwin-amber">{{ simMode === 1 ? 'XBOX' : 'HID' }}</strong>
           </article>
 
-          <article class="p-4 rounded-2xl border border-white/10 bg-darwin-panel">
+          <article class="p-4 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
             <span class="text-darwin-muted text-[0.7rem] uppercase tracking-widest block mb-1">CRSF</span>
             <strong class="text-base" :class="crsfStatus.isLinked ? 'text-green-400' : 'text-darwin-muted'">
               {{ crsfStatus.isLinked ? t.linked : t.unlinked }}
             </strong>
           </article>
 
-          <article class="p-4 rounded-2xl border border-white/10 bg-darwin-panel">
+          <article class="p-4 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
             <span class="text-darwin-muted text-[0.7rem] uppercase tracking-widest block mb-1">{{ t.signal }}</span>
             <strong class="text-base text-darwin-ink">
               <template v-if="crsfStatus.isLinked">
@@ -87,7 +98,7 @@
         <!-- Joystick + Main Channels -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <!-- Joystick Section -->
-          <article class="p-5 rounded-2xl border border-white/10 bg-darwin-panel">
+          <article class="p-5 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
             <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ t.stickView }}</h3>
             <div class="grid grid-cols-2 gap-4 justify-items-center">
               <Joystick :x="leftStick.x" :y="leftStick.y" :label="t.leftStick" />
@@ -96,13 +107,13 @@
           </article>
 
           <!-- Channel Values Overview -->
-          <article class="p-5 rounded-2xl border border-white/10 bg-darwin-panel">
+          <article class="p-5 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
             <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ t.channelValues }}</h3>
             <div class="grid grid-cols-2 gap-3">
-              <div v-for="ch in channels.slice(0, 8)" :key="ch.id" class="flex items-center justify-between p-3 border border-white/5 rounded-xl bg-white/5">
+              <div v-for="ch in channels.slice(0, 8)" :key="ch.id" class="flex items-center justify-between p-3 border border-[var(--theme-border-light)] rounded-xl bg-[var(--theme-bg-subtle)]">
                 <span class="text-darwin-muted text-xs font-bold">CH{{ ch.id }}</span>
                 <div class="text-right">
-                  <strong class="text-sm text-white block">{{ ch.mappedValue }}</strong>
+                  <strong class="text-sm text-[var(--theme-text)] block">{{ ch.mappedValue }}</strong>
                   <span class="text-[0.6rem] text-darwin-muted">{{ percentLabel(ch.mappedValue) }}</span>
                 </div>
               </div>
@@ -120,7 +131,7 @@
             :key="sub.id"
             type="button"
             @click="configSubTab = sub.id"
-            :class="['px-4 py-2.5 text-sm font-bold text-left rounded-xl transition-all whitespace-nowrap lg:whitespace-normal', configSubTab === sub.id ? 'bg-darwin-amber/20 text-darwin-amber border border-darwin-amber/30' : 'text-darwin-muted border border-transparent hover:border-white/10']"
+            :class="['px-4 py-2.5 text-sm font-bold text-left rounded-xl transition-all whitespace-nowrap lg:whitespace-normal', configSubTab === sub.id ? 'bg-darwin-amber/20 text-darwin-amber border border-darwin-amber/30' : 'text-darwin-muted border border-transparent hover:border-[var(--theme-border)]']"
           >
             {{ sub.label }}
           </button>
@@ -205,6 +216,7 @@ const {
   showCalibrationModal, stickMode, channelMapping, availableSwitches,
   isCrsfLoading, crsfStatus, channels, crsfMenus,
   leftStick, rightStick, visibleChannels,
+  isDarkMode, toggleTheme,
   changeLanguage, saveCalibration, setStickMode,
   updateChannelMapping, resetChannelMapping, writeChannelMapping,
   refreshCrsf, handleCrsfBind, handleCrsfCommand, handleCrsfSelectChange,

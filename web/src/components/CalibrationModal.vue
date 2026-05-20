@@ -1,12 +1,12 @@
 <template>
   <Teleport to="body">
     <div v-if="visible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70" @click.self="onCancel">
-      <div class="bg-[#1a1a1a] border border-white/10 rounded-3xl p-8 w-[420px] select-none">
+      <div class="bg-[var(--theme-panel)] border border-[var(--theme-border)] rounded-3xl p-8 w-[420px] select-none">
         <!-- Step Progress -->
         <div class="flex items-center justify-center gap-2 mb-6">
           <div v-for="(s, i) in steps" :key="i" class="flex items-center gap-2">
-            <div :class="['w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors', i <= stepIndex ? 'bg-darwin-amber text-black' : 'bg-white/10 text-darwin-muted']">{{ i + 1 }}</div>
-            <div v-if="i < steps.length - 1" :class="['w-8 h-px transition-colors', i < stepIndex ? 'bg-darwin-amber' : 'bg-white/10']"></div>
+            <div :class="['w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors', i <= stepIndex ? 'bg-darwin-amber text-black' : 'bg-[var(--theme-bg-hover)] text-darwin-muted']">{{ i + 1 }}</div>
+            <div v-if="i < steps.length - 1" :class="['w-8 h-px transition-colors', i < stepIndex ? 'bg-darwin-amber' : 'bg-[var(--theme-border)]']"></div>
           </div>
         </div>
 
@@ -14,11 +14,11 @@
         <div class="relative w-[240px] h-[240px] mx-auto mb-6">
           <svg viewBox="0 0 240 240" class="w-full h-full">
             <!-- Outer boundary -->
-            <circle cx="120" cy="120" r="100" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="2"/>
-            <circle cx="120" cy="120" r="68" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+            <circle cx="120" cy="120" r="100" fill="none" stroke="var(--theme-svg-stroke)" stroke-width="2"/>
+            <circle cx="120" cy="120" r="68" fill="none" stroke="var(--theme-svg-stroke-subtle)" stroke-width="1"/>
             <!-- Crosshair -->
-            <line x1="120" y1="20" x2="120" y2="220" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-            <line x1="20" y1="120" x2="220" y2="120" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+            <line x1="120" y1="20" x2="120" y2="220" stroke="var(--theme-svg-stroke-faint)" stroke-width="1"/>
+            <line x1="20" y1="120" x2="220" y2="120" stroke="var(--theme-svg-stroke-faint)" stroke-width="1"/>
             <!-- Stick dot -->
             <circle :cx="120 + displayX" :cy="120 + displayY" r="14" fill="#F5A623" opacity="0.9" filter="url(#glow)"/>
             <defs>
@@ -44,21 +44,21 @@
         </div>
 
         <!-- Instruction -->
-        <p class="text-center text-white text-base mb-1 font-medium">{{ instruction }}</p>
+        <p class="text-center text-[var(--theme-text)] text-base mb-1 font-medium">{{ instruction }}</p>
         <p v-if="hint" class="text-center text-darwin-muted text-sm mb-6">{{ hint }}</p>
         <p v-else class="mb-6"></p>
 
         <!-- Completion Stats -->
         <div v-if="step === 'complete'" class="grid grid-cols-2 gap-3 mb-6">
-          <div v-for="(axis, i) in calibratedAxes" :key="i" class="p-3 border border-white/10 rounded-xl bg-white/5">
+          <div v-for="(axis, i) in calibratedAxes" :key="i" class="p-3 border border-[var(--theme-border)] rounded-xl bg-[var(--theme-bg-subtle)]">
             <span class="text-darwin-muted text-xs block mb-1">{{ axis.label }}</span>
-            <span class="text-white text-sm">min {{ axis.min }} · max {{ axis.max }}</span>
+            <span class="text-[var(--theme-text)] text-sm">min {{ axis.min }} · max {{ axis.max }}</span>
           </div>
         </div>
 
         <!-- Buttons -->
         <div class="flex justify-center gap-4">
-          <button v-if="step !== 'complete'" @click="onCancel" class="px-6 py-2.5 rounded-full border border-white/10 text-darwin-ink bg-white/5 hover:bg-white/10">取消</button>
+          <button v-if="step !== 'complete'" @click="onCancel" class="px-6 py-2.5 rounded-full border border-[var(--theme-border)] text-darwin-ink bg-[var(--theme-bg-subtle)] hover:bg-[var(--theme-bg-hover)]">取消</button>
           <button v-if="step === 'complete'" @click="onConfirm" class="px-6 py-2.5 rounded-full bg-gradient-to-br from-darwin-amber to-darwin-orange text-black font-bold">完成</button>
         </div>
       </div>

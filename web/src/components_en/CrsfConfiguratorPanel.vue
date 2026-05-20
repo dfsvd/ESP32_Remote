@@ -1,10 +1,10 @@
 <template>
-  <section class="grid gap-[18px] p-6 rounded-[28px] text-darwin-ink bg-[radial-gradient(circle_at_top_left,rgba(245,166,35,0.1),transparent_35%),radial-gradient(circle_at_top_right,rgba(217,119,6,0.1),transparent_28%),linear-gradient(180deg,rgba(45,45,45,0.9),rgba(35,35,35,0.9))] shadow-[0_28px_80px_rgba(0,0,0,0.4)] border border-white/5">
+  <section class="grid gap-[18px] p-6 rounded-[28px] text-darwin-ink bg-[var(--theme-crsf-gradient)] shadow-[0_28px_80px_var(--theme-shadow-lg)] border border-[var(--theme-border-light)]">
     <!-- Header: Controls & Global Status -->
-    <header class="flex flex-col lg:flex-row items-stretch justify-between gap-4 p-4 lg:p-[18px] rounded-[24px] bg-gradient-to-br from-white/10 to-transparent border border-white/10">
+    <header class="flex flex-col lg:flex-row items-stretch justify-between gap-4 p-4 lg:p-[18px] rounded-[24px] bg-gradient-to-br from-[var(--theme-bg-hover)] to-transparent border border-[var(--theme-border)]">
       <div class="flex items-center gap-3 flex-wrap">
-        <button 
-          class="px-[18px] py-[12px] bg-white/10 border border-white/10 text-darwin-ink font-bold rounded-full cursor-pointer transition-all hover:-translate-y-px hover:bg-white/20"
+        <button
+          class="px-[18px] py-[12px] bg-[var(--theme-bg-hover)] border border-[var(--theme-border)] text-darwin-ink font-bold rounded-full cursor-pointer transition-all hover:-translate-y-px hover:bg-[var(--theme-bg-active)]"
           type="button"
           @click="$emit('refresh')"
         >
@@ -21,17 +21,17 @@
       </div>
 
       <section class="grid grid-cols-3 gap-2.5 lg:gap-[14px] flex-auto">
-        <article class="p-3.5 lg:p-[18px] rounded-[18px] text-center lg:text-left bg-[#1f1f22] border border-white/5">
+        <article class="p-3.5 lg:p-[18px] rounded-[18px] text-center lg:text-left bg-[var(--theme-crsf-status-bg)] border border-[var(--theme-border-light)]">
           <span class="block mb-1.5 lg:mb-2 text-[11px] lg:text-xs uppercase tracking-[0.16em] text-darwin-muted">{{ t.link }}</span>
-          <strong :class="['block text-[18px] lg:text-[26px] leading-[1.15]', status.isLinked ? 'text-darwin-amber' : 'text-[#8b6f5d]']">
+          <strong :class="['block text-[18px] lg:text-[26px] leading-[1.15]', status.isLinked ? 'text-darwin-amber' : 'text-[var(--theme-offline-text)]']">
             {{ status.isLinked ? t.online : t.offline }}
           </strong>
         </article>
-        <article class="p-3.5 lg:p-[18px] rounded-[18px] text-center lg:text-left bg-[#1f1f22] border border-white/5">
+        <article class="p-3.5 lg:p-[18px] rounded-[18px] text-center lg:text-left bg-[var(--theme-crsf-status-bg)] border border-[var(--theme-border-light)]">
           <span class="block mb-1.5 lg:mb-2 text-[11px] lg:text-xs uppercase tracking-[0.16em] text-darwin-muted">{{ t.signal }}</span>
           <strong class="block text-[18px] lg:text-[26px] leading-[1.15] text-darwin-ink">{{ status.rssi ?? '--' }}</strong>
         </article>
-        <article class="p-3.5 lg:p-[18px] rounded-[18px] text-center lg:text-left bg-[#1f1f22] border border-white/5">
+        <article class="p-3.5 lg:p-[18px] rounded-[18px] text-center lg:text-left bg-[var(--theme-crsf-status-bg)] border border-[var(--theme-border-light)]">
           <span class="block mb-1.5 lg:mb-2 text-[11px] lg:text-xs uppercase tracking-[0.16em] text-darwin-muted">{{ t.menuSync }}</span>
           <strong class="block text-[18px] lg:text-[26px] leading-[1.15] text-darwin-ink">{{ status.loadedParams ?? 0 }} / {{ status.totalParams ?? 0 }}</strong>
         </article>
@@ -39,8 +39,8 @@
     </header>
 
     <!-- Menu Tree -->
-    <section class="p-3.5 lg:p-[18px] rounded-[26px] bg-white/5 border border-white/10">
-      <aside class="p-3.5 lg:p-[18px] rounded-[22px] bg-[#1a1a1c] border border-white/5">
+    <section class="p-3.5 lg:p-[18px] rounded-[26px] bg-[var(--theme-bg-subtle)] border border-[var(--theme-border)]">
+      <aside class="p-3.5 lg:p-[18px] rounded-[22px] bg-[var(--theme-crsf-tree-bg)] border border-[var(--theme-border-light)]">
         <ul class="grid gap-2.5 p-0 m-0 list-none">
           <li 
             v-for="node in flattenedMenuTree" 
@@ -52,11 +52,11 @@
             <button 
               type="button"
               :class="[
-                'w-full grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[10px] lg:gap-[14px] text-left p-[13px_12px] lg:p-[14px] rounded-[18px] border border-transparent bg-white/5 text-darwin-ink cursor-pointer transition-all hover:-translate-y-px hover:border-darwin-amber/30 hover:shadow-[0_14px_26px_rgba(0,0,0,0.5)]',
+                'w-full grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[10px] lg:gap-[14px] text-left p-[13px_12px] lg:p-[14px] rounded-[18px] border border-transparent bg-[var(--theme-crsf-item-bg)] text-darwin-ink cursor-pointer transition-all hover:-translate-y-px hover:border-darwin-amber/30 hover:shadow-[0_14px_26px_var(--theme-shadow-sm)]',
                 {
-                  '!-translate-y-px !border-darwin-amber/30 !shadow-[0_14px_26px_rgba(0,0,0,0.5)] bg-gradient-to-b from-darwin-amber/10 to-transparent': isSelected(node.item.id),
-                  'bg-gradient-to-b from-white/10 to-white/5': node.item.kind === 'folder' && isSelected(node.item.id),
-                  '!bg-white/10': node.depth > 0
+                  '!-translate-y-px !border-darwin-amber/30 !shadow-[0_14px_26px_var(--theme-crsf-item-hover-shadow)] bg-gradient-to-b from-darwin-amber/10 to-transparent': isSelected(node.item.id),
+                  'bg-gradient-to-b from-[var(--theme-bg-hover)] to-[var(--theme-bg-subtle)]': node.item.kind === 'folder' && isSelected(node.item.id),
+                  '!bg-[var(--theme-bg-hover)]': node.depth > 0
                 }
               ]"
               :style="{ paddingLeft: `calc(12px + (${node.depth} * 18px))` }"
@@ -76,10 +76,10 @@
                 <span v-if="node.item.kind === 'select'" class="inline-flex items-center justify-center px-2.5 py-1.5 rounded-full text-[11px] lg:text-xs font-bold whitespace-nowrap bg-darwin-amber/10 text-darwin-amber max-w-full">
                   {{ getSelectLabel(node.item) }}
                 </span>
-                <span v-else-if="node.item.kind === 'info'" class="inline-flex items-center justify-center px-2.5 py-1.5 rounded-full text-[11px] lg:text-xs font-bold whitespace-nowrap bg-white/10 text-darwin-muted max-w-full">
+                <span v-else-if="node.item.kind === 'info'" class="inline-flex items-center justify-center px-2.5 py-1.5 rounded-full text-[11px] lg:text-xs font-bold whitespace-nowrap bg-[var(--theme-bg-hover)] text-darwin-muted max-w-full">
                   {{ t.readOnly }}
                 </span>
-                <span v-else-if="node.item.kind === 'command'" class="inline-flex items-center justify-center px-2.5 py-1.5 rounded-full text-[11px] lg:text-xs font-bold whitespace-nowrap bg-[#cb7a2f]/20 text-[#d97706] max-w-full">
+                <span v-else-if="node.item.kind === 'command'" class="inline-flex items-center justify-center px-2.5 py-1.5 rounded-full text-[11px] lg:text-xs font-bold whitespace-nowrap bg-[var(--theme-cmd-badge-bg)] text-[var(--theme-cmd-badge-text)] max-w-full">
                   {{ t.command }}
                 </span>
                 <span 
@@ -98,26 +98,26 @@
               :style="{ paddingLeft: `calc(12px + (${node.depth} * 18px))` }"
             >
               <!-- Select Editor -->
-              <section v-if="node.item.kind === 'select'" class="p-4 mt-2.5 border border-white/5 rounded-[18px] bg-[#1f1f22]">
+              <section v-if="node.item.kind === 'select'" class="p-4 mt-2.5 border border-[var(--theme-border-light)] rounded-[18px] bg-[var(--theme-crsf-status-bg)]">
                 <div class="grid grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
                   <button 
                     v-for="opt in node.item.optionItems" 
                     :key="`${node.item.id}-${opt.index}`"
                     type="button"
                     :class="[
-                      'min-h-[90px] grid content-between p-3.5 rounded-[18px] border border-white/10 bg-white/5 text-left cursor-pointer text-darwin-ink transition-all hover:-translate-y-px hover:border-darwin-amber/40 hover:shadow-[0_14px_26px_rgba(0,0,0,0.4)]',
-                      { 'border-darwin-amber/50 bg-gradient-to-b from-darwin-amber/10 to-transparent shadow-[0_14px_26px_rgba(0,0,0,0.4)]': opt.index === node.item.value }
+                      'min-h-[90px] grid content-between p-3.5 rounded-[18px] border border-[var(--theme-border)] bg-[var(--theme-bg-subtle)] text-left cursor-pointer text-darwin-ink transition-all hover:-translate-y-px hover:border-darwin-amber/40 hover:shadow-[0_14px_26px_var(--theme-crsf-option-shadow)]',
+                      { 'border-darwin-amber/50 bg-gradient-to-b from-darwin-amber/10 to-transparent shadow-[0_14px_26px_var(--theme-crsf-option-shadow)]': opt.index === node.item.value }
                     ]"
                     @click.stop="handleSelect(node.item, opt)"
                   >
-                    <span class="inline-flex w-fit px-2 py-1 rounded-full bg-black/20 text-[11px] tracking-[0.08em] uppercase text-darwin-muted">{{ opt.index }}</span>
+                    <span class="inline-flex w-fit px-2 py-1 rounded-full bg-[var(--theme-bg-active)] text-[11px] tracking-[0.08em] uppercase text-darwin-muted">{{ opt.index }}</span>
                     <strong class="block leading-[1.2] break-words">{{ opt.label }}</strong>
                   </button>
                 </div>
               </section>
 
               <!-- Command Editor -->
-              <section v-else-if="node.item.kind === 'command'" class="p-4 mt-2.5 border border-white/5 rounded-[18px] bg-[#1f1f22]">
+              <section v-else-if="node.item.kind === 'command'" class="p-4 mt-2.5 border border-[var(--theme-border-light)] rounded-[18px] bg-[var(--theme-crsf-status-bg)]">
                 <div class="flex items-center gap-3 flex-wrap">
                   <button 
                     class="max-w-full px-[18px] py-[12px] border border-transparent bg-gradient-to-br from-darwin-amber to-darwin-orange text-black font-bold rounded-[22px] whitespace-normal break-words shadow-[0_16px_30px_rgba(245,166,35,0.2)] cursor-pointer transition-all hover:-translate-y-px disabled:opacity-60 disabled:cursor-not-allowed"
@@ -131,13 +131,13 @@
               </section>
 
               <!-- Info/Text Editor -->
-              <section v-else-if="node.item.kind === 'info'" class="p-4 mt-2.5 border border-white/5 rounded-[18px] bg-[#1f1f22]">
-                <div class="p-4 rounded-[16px] bg-black/30 border border-white/5 text-darwin-muted font-mono break-words">
+              <section v-else-if="node.item.kind === 'info'" class="p-4 mt-2.5 border border-[var(--theme-border-light)] rounded-[18px] bg-[var(--theme-crsf-status-bg)]">
+                <div class="p-4 rounded-[16px] bg-[var(--theme-bg-hover)] border border-[var(--theme-border-light)] text-darwin-muted font-mono break-words">
                   {{ node.item.content || '-' }}
                 </div>
               </section>
-              <section v-else class="p-4 mt-2.5 border border-white/5 rounded-[18px] bg-[#1f1f22]">
-                <div class="p-4 rounded-[16px] bg-black/30 border border-white/5 text-darwin-muted font-mono break-words">
+              <section v-else class="p-4 mt-2.5 border border-[var(--theme-border-light)] rounded-[18px] bg-[var(--theme-crsf-status-bg)]">
+                <div class="p-4 rounded-[16px] bg-[var(--theme-bg-hover)] border border-[var(--theme-border-light)] text-darwin-muted font-mono break-words">
                   {{ node.item.content || 'No preview available.' }}
                 </div>
               </section>

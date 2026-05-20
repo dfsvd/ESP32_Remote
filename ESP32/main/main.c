@@ -261,6 +261,20 @@ static void print_crsf_state_snapshot(const crsf_state_t *db)
     ESP_LOGW(TAG, "================================================");
 }
 
+/** 🔧 调试：打印全部 16 通道数值 */
+static void print_joystick_snapshot(const fpv_joystick_report_t *r)
+{
+    if (!r) return;
+    ESP_LOGI(TAG, "CH1(roll)=%4d  CH2(pitch)=%4d  CH3(throttle)=%4d  CH4(yaw)=%4d",
+             r->roll, r->pitch, r->throttle, r->yaw);
+    ESP_LOGI(TAG, "CH5(aux1)=%4d  CH6(aux2)=%4d  CH7(aux3)=%4d  CH8(aux4)=%4d",
+             r->aux1, r->aux2, r->aux3, r->aux4);
+    ESP_LOGI(TAG, "CH9(sw1)=%4d  CH10(sw2)=%4d  CH11(sw3)=%4d  CH12(sw4)=%4d",
+             r->sw1, r->sw2, r->sw3, r->sw4);
+    ESP_LOGI(TAG, "CH13(sw5)=%4d  CH14(sw6)=%4d  CH15(sw7)=%4d  CH16(sw8)=%4d",
+             r->sw5, r->sw6, r->sw7, r->sw8);
+}
+
 /**
  * @brief 将摇杆报告的 16 通道数据同步到 CRSF 协议栈
  * @note  通道映射: CH1=roll, CH2=pitch, CH3=throttle, CH4=yaw,
@@ -531,12 +545,13 @@ void app_main(void)
     bool    host_mode_selected = false;
     uint8_t ble_mode           = 0;
     bool    bind_mode_active   = false;
-    // 调试: 临时强制 WiFi 模式，方便测试 web 修改
-    // 恢复 GPIO 选择时注释下面三行，取消上一行 detect_boot_mode 的注释即可
-    host_mode_selected = true;
+    // detect_boot_mode(&host_mode_selected, &ble_mode, &bind_mode_active);
+
+    // 测试
+    // usb_init();
+    // ble_init(&joy);
     rc_wifi_server_init(&joy);
-    ESP_LOGI(TAG, "开机模式: WiFi (调试强制模式)");
-    //detect_boot_mode(&host_mode_selected, &ble_mode, &bind_mode_active);
+    ESP_LOGI(TAG, "Wi-Fi已初始化 (测试模式)");
 
     /* ---- 7. 主循环 ---- */
     struct auto_bind_ctx bind = {0};
@@ -546,11 +561,14 @@ void app_main(void)
     bool    waiting_link_logged   = false;
     bool    link_ready_logged     = false;
     uint8_t last_loaded_params    = 0;
+    // uint32_t last_joy_print = 0;
 
     while (1)
     {
         crsf_state_t *state  = crsf_get_state();
         uint32_t      now_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+
+        /* --- 调试输出: 每 3 秒打印一次全部通道值 --- */
 
         /* --- BLE 输入更新 --- */
         if (ble_mode)
@@ -577,6 +595,13 @@ void app_main(void)
             waiting_link_logged = true;
             link_ready_logged   = false;
         }
+
+        /* --- 调试输出: 每 3 秒打印一次全部通道值 --- */
+        // if (now_ms - last_joy_print >= 3000)
+        // {
+        //     last_joy_print = now_ms;
+        //     print_joystick_snapshot(&joy);
+        // }
 
         /* --- 自动对频 --- */
         poll_auto_bind(state, now_ms, &bind);
