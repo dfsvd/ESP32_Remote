@@ -23,8 +23,7 @@ static bool s_saved_crsf_half_duplex = false;
 static bool s_has_saved_crsf_link_mode = false;
 
 // =================================================================================
-// Captive Portal DNS — 将所有域名解析到 ESP32 IP (192.168.4.1)
-// 设备连接 WiFi 后会自动弹出"登录网络"通知，点击即打开配置页面
+// 快速 DNS 响应 — 收到查询立即回 NXDOMAIN，避免手机 DNS 超时卡住联网检测
 // =================================================================================
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -40,68 +39,28 @@ static void dns_server_task(void *pvParameters) {
     };
 
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock < 0) {
-        ESP_LOGE(TAG, "DNS socket 创建失败");
-        vTaskDelete(NULL);
-        return;
-    }
-
+    if (sock < 0) { vTaskDelete(NULL); return; }
     if (bind(sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) != 0) {
-        ESP_LOGE(TAG, "DNS socket bind 失败 (port 53)");
-        close(sock);
-        vTaskDelete(NULL);
-        return;
+        close(sock); vTaskDelete(NULL); return;
     }
 
     uint8_t buf[512];
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
 
-    ESP_LOGI(TAG, "Captive Portal DNS 已启动");
-
     while (1) {
         int len = recvfrom(sock, buf, sizeof(buf), 0,
                            (struct sockaddr *)&client_addr, &client_len);
         if (len < 12) continue;
 
-        // 只处理标准查询 (QR=0, OPCODE=0)
-        uint16_t flags = (buf[2] << 8) | buf[3];
-        if ((flags & 0x7800) != 0) continue;
+        // 原样复制 ID，设置 NXDOMAIN(3) + 回答数=0
+        buf[2] = 0x83;  // QR=1 + NXDOMAIN
+        buf[3] = 0x83;  //
+        buf[6] = 0; buf[7] = 0;
+        buf[8] = 0; buf[9] = 0;
+        buf[10] = 0; buf[11] = 0;
 
-        // 跳过问题名称 (不定长)
-        int qname_len = 0;
-        while (len > 12 + qname_len && buf[12 + qname_len] != 0)
-            qname_len += buf[12 + qname_len] + 1;
-        qname_len++;
-        if (12 + qname_len + 4 > len) continue;
-
-        // 只响应 A 记录查询
-        uint16_t qtype  = (buf[12 + qname_len] << 8) | buf[12 + qname_len + 1];
-        uint16_t qclass = (buf[12 + qname_len + 2] << 8) | buf[12 + qname_len + 3];
-        if (qtype != 1 || qclass != 1) continue;
-
-        // 构造 DNS 响应
-        // 1. 复制 ID + 设置响应标志 (0x8180)
-        buf[2] = 0x81;
-        buf[3] = 0x80;
-        // 2. 回答数 = 1
-        buf[6] = 0; buf[7] = 1;
-        buf[8] = 0; buf[9] = 0; // NSCOUNT
-        buf[10] = 0; buf[11] = 0; // ARCOUNT
-
-        // 3. 回答: 名称指针 (指向问题中的域名), 类型 A, CLASS IN, TTL 60s
-        int off = 12 + qname_len + 4;
-        buf[off]     = 0xC0;
-        buf[off + 1] = 0x0C;            // 名称指针
-        buf[off + 2] = 0x00; buf[off + 3] = 0x01; // TYPE A
-        buf[off + 4] = 0x00; buf[off + 5] = 0x01; // CLASS IN
-        buf[off + 6] = 0x00; buf[off + 7] = 0x00;
-        buf[off + 8] = 0x00; buf[off + 9] = 0x3C; // TTL = 60
-        buf[off + 10] = 0x00; buf[off + 11] = 0x04; // RDLENGTH = 4
-        buf[off + 12] = 192; buf[off + 13] = 168;
-        buf[off + 14] = 4;    buf[off + 15] = 1;    // 192.168.4.1
-
-        sendto(sock, buf, off + 16, 0,
+        sendto(sock, buf, len, 0,
                (struct sockaddr *)&client_addr, client_len);
     }
 
@@ -939,6 +898,15 @@ static void start_webserver(fpv_joystick_report_t *joy)
         };
         httpd_register_uri_handler(server, &favicon_uri);
 
+        // generate_204 — 手机连通性检测，回 204 即可避免弹窗和反复重试
+        httpd_uri_t gen204_uri = {
+            .uri       = "/generate_204",
+            .method    = HTTP_GET,
+            .handler   = favicon_handler,
+            .user_ctx  = NULL
+        };
+        httpd_register_uri_handler(server, &gen204_uri);
+
         // Captive Portal 已关闭: 浏览器直接访问 192.168.4.1 即可
         // httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, captive_portal_handler);
 
@@ -988,6 +956,7 @@ void rc_wifi_server_init(fpv_joystick_report_t *joy)
     ESP_LOGI(TAG, "WiFi AP 启动完成. SSID:%s", wifi_config.ap.ssid);
 
     xTaskCreatePinnedToCore(dns_server_task, "dns_captive", 3072, NULL, 3, NULL, 0);
+
 
     start_webserver(joy);
 }

@@ -348,10 +348,10 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode, bool *
     *ble_mode           = 0;
     *bind_mode_active   = false;
 
-    bool ch1_low  = (gpio_get_level(RC_SWITCH_2POS_PIN_CH1) == 0);
-    bool ch3_low  = (gpio_get_level(RC_SWITCH_2POS_PIN_CH3) == 0);
-    bool up_low   = (gpio_get_level(RC_SWITCH_3POS_UP_PIN) == 0);
-    bool down_low = (gpio_get_level(RC_SWITCH_3POS_DOWN_PIN) == 0);
+    bool ch1_low  = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
+    bool ch3_low  = (gpio_get_level(RC_SWITCH_SD_PIN) == 0);
+    bool up_low   = (gpio_get_level(RC_SWITCH_SC_UP_PIN) == 0);
+    bool down_low = (gpio_get_level(RC_SWITCH_SC_DOWN_PIN) == 0);
 
     if (ch1_low)
     {
@@ -501,8 +501,8 @@ void app_main(void)
         .pull_down_en = false,
     };
     const gpio_config_t mode_select_config = {
-        .pin_bit_mask = (1ULL << RC_SWITCH_2POS_PIN_CH1) | (1ULL << RC_SWITCH_2POS_PIN_CH3) |
-                        (1ULL << RC_SWITCH_3POS_UP_PIN) | (1ULL << RC_SWITCH_3POS_DOWN_PIN),
+        .pin_bit_mask = (1ULL << RC_SWITCH_SA_PIN) | (1ULL << RC_SWITCH_SD_PIN) |
+                        (1ULL << RC_SWITCH_SC_UP_PIN) | (1ULL << RC_SWITCH_SC_DOWN_PIN),
         .mode         = GPIO_MODE_INPUT,
         .intr_type    = GPIO_INTR_DISABLE,
         .pull_up_en   = true,

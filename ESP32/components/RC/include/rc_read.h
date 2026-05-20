@@ -71,23 +71,23 @@ typedef struct {
 // #define ADC_aux3        ADC_CHANNEL_2
 // #define ADC_aux4        ADC_CHANNEL_3
 
-// 开关引脚统一提成宏，避免和 CRSF/UART 占用冲突
-#define RC_SWITCH_2POS_PIN_CH3   GPIO_NUM_36
-#define RC_SWITCH_2POS_PIN_CH4   GPIO_NUM_37
-#define RC_SWITCH_2POS_PIN_CH1   GPIO_NUM_38
-#define RC_SWITCH_3POS_UP_PIN    GPIO_NUM_39
-#define RC_SWITCH_3POS_DOWN_PIN  GPIO_NUM_40
+// 开关引脚 — 以遥控器物理标识命名
+#define RC_SWITCH_SA_PIN        GPIO_NUM_38  // SA: 按键(自复位) → CH8
+#define RC_SWITCH_SB_PIN        GPIO_NUM_37  // SB: 2段拨码      → CH6
+#define RC_SWITCH_SC_UP_PIN     GPIO_NUM_39  // SC: 3段拨码 UP   → CH7
+#define RC_SWITCH_SC_DOWN_PIN   GPIO_NUM_40  // SC: 3段拨码 DOWN → CH7
+#define RC_SWITCH_SD_PIN        GPIO_NUM_36  // SD: 按键(自复位) → CH5
 
-#define GPIO_SW         ((1ULL << RC_SWITCH_2POS_PIN_CH1) | (1ULL << RC_SWITCH_3POS_UP_PIN) | (1ULL << RC_SWITCH_3POS_DOWN_PIN)| (1ULL << RC_SWITCH_2POS_PIN_CH3)| (1ULL << RC_SWITCH_2POS_PIN_CH4))
+#define GPIO_SW         ((1ULL << RC_SWITCH_SA_PIN) | (1ULL << RC_SWITCH_SC_UP_PIN) | (1ULL << RC_SWITCH_SC_DOWN_PIN)| (1ULL << RC_SWITCH_SD_PIN)| (1ULL << RC_SWITCH_SB_PIN))
 
-#define READ_KEY_CH1    read_2pos_switch(RC_SWITCH_2POS_PIN_CH1, true)
-#define READ_KEY_CH2    read_3pos_switch(RC_SWITCH_3POS_UP_PIN, RC_SWITCH_3POS_DOWN_PIN)
-#define READ_KEY_CH3    read_2pos_switch(RC_SWITCH_2POS_PIN_CH3, true)
-#define READ_KEY_CH4    read_2pos_switch(RC_SWITCH_2POS_PIN_CH4, true)
-#define READ_KEY_CH5    1500
-#define READ_KEY_CH6    1500
-#define READ_KEY_CH7    1500
-#define READ_KEY_CH8    1500
+#define READ_KEY_SA     read_2pos_switch(RC_SWITCH_SA_PIN, true)     // 按键 → CH8
+#define READ_KEY_SB     read_2pos_switch(RC_SWITCH_SB_PIN, true)     // 2段  → CH6
+#define READ_KEY_SC     read_3pos_switch(RC_SWITCH_SC_UP_PIN, RC_SWITCH_SC_DOWN_PIN)  // 3段  → CH7
+#define READ_KEY_SD     read_2pos_switch(RC_SWITCH_SD_PIN, true)     // 按键 → CH5
+#define READ_KEY_FIXED1 1500
+#define READ_KEY_FIXED2 1500
+#define READ_KEY_FIXED3 1500
+#define READ_KEY_FIXED4 1500
 
 extern channel_cal_t limit[16];
 void ADC_TASK(void *arg);
