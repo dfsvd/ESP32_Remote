@@ -260,9 +260,9 @@ void ADC_TASK(void *arg)
                           
                             switch (ch)
                             {
-                                case ADC_roll: 
-                                    joy->roll = map_joystick(final_raw, limit[0]);
-                                    joy->raw_roll = final_raw; 
+                                case ADC_roll:
+                                    joy->roll = 3000 - map_joystick(final_raw, limit[0]);
+                                    joy->raw_roll = final_raw;
                                     break;
                                     
                                 case ADC_pitch: 
@@ -276,7 +276,7 @@ void ADC_TASK(void *arg)
                                     break;
                                     
                                 case ADC_yaw:
-                                    joy->yaw = map_joystick(final_raw, limit[3]);
+                                    joy->yaw = 3000 - map_joystick(final_raw, limit[3]);
                                     joy->raw_yaw = final_raw;
                                     break;
                             }

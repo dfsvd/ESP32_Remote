@@ -81,7 +81,7 @@ typedef struct {
 #define GPIO_SW         ((1ULL << RC_SWITCH_SA_PIN) | (1ULL << RC_SWITCH_SC_UP_PIN) | (1ULL << RC_SWITCH_SC_DOWN_PIN)| (1ULL << RC_SWITCH_SD_PIN)| (1ULL << RC_SWITCH_SB_PIN))
 
 #define READ_KEY_SA     read_2pos_switch(RC_SWITCH_SA_PIN, true)     // 按键 → CH8
-#define READ_KEY_SB     read_2pos_switch(RC_SWITCH_SB_PIN, true)     // 2段  → CH6
+#define READ_KEY_SB     read_2pos_switch(RC_SWITCH_SB_PIN, false)    // 2段  → CH6
 #define READ_KEY_SC     read_3pos_switch(RC_SWITCH_SC_UP_PIN, RC_SWITCH_SC_DOWN_PIN)  // 3段  → CH7
 #define READ_KEY_SD     read_2pos_switch(RC_SWITCH_SD_PIN, true)     // 按键 → CH5
 #define READ_KEY_FIXED1 1500
