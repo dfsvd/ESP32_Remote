@@ -708,9 +708,16 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 }
 
                 save_settings_to_nvs();
-                ESP_LOGI(TAG, "校准数据已更新并保存");
+                vTaskDelay(pdMS_TO_TICKS(100));
+                ws_send_text(req, "CAL_OK");
+                ESP_LOGI(TAG, "校准数据已保存");
+                vTaskDelay(pdMS_TO_TICKS(200));
+                esp_restart();
+            }
+            else if (strcmp(text, "SAVE_NVS") == 0) {
+                save_settings_to_nvs();
+                ESP_LOGI(TAG, "保存 NVS 并重启...");
                 vTaskDelay(pdMS_TO_TICKS(300));
-                ESP_LOGI(TAG, "正在重启设备...");
                 esp_restart();
             }
             else if (strcmp(text, "CRSF_REFRESH") == 0) {

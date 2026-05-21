@@ -1,0 +1,19 @@
+# ESP-IDF build
+ESP32/build/
+ESP32/sdkconfig
+
+# Web build output
+web/web/
+web/dist/
+web/node_modules/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
