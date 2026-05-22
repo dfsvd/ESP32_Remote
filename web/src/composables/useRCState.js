@@ -424,7 +424,7 @@ function onCalibrationResult(results) {
   }
 
   function requestCalibration() {
-    ws.value?.sendData('CRSF_SNAPSHOT')
+    ws.value?.sendData('GET_CAL')
   }
 
   // --- Channel Mapping Methods ---

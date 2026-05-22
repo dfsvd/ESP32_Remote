@@ -209,24 +209,33 @@ void update_switch_channels(fpv_joystick_report_t *joy) {
     // 4个实体按键/开关映射到 CH5~CH8 (aux1~aux4)
     // SA(按键,GPIO38) → CH8 | SB(2段,GPIO37) → CH6
     // SC(3段,GPIO39/40) → CH7 | SD(按键,GPIO36) → CH5
-    joy->aux1 = READ_KEY_SD;    // SD按键 → CH5
-    joy->raw_aux1 = joy->aux1;
-    joy->aux2 = READ_KEY_SB;    // SB 2段 → CH6
-    joy->raw_aux2 = joy->aux2;
-    joy->aux3 = READ_KEY_SC;    // SC 3段 → CH7
-    joy->raw_aux3 = joy->aux3;
-    joy->aux4 = READ_KEY_SA;    // SA按键 → CH8
-    joy->raw_aux4 = joy->aux4;
+    // raw 存原始开关值，输出值经过 EPA/REV 处理
+    uint16_t raw_sd = READ_KEY_SD;
+    uint16_t raw_sb = READ_KEY_SB;
+    uint16_t raw_sc = READ_KEY_SC;
+    uint16_t raw_sa = READ_KEY_SA;
 
-    // CH9~CH16 无实体开关，固定中位
-    joy->sw1 = 1500;
-    joy->sw2 = 1500;
-    joy->sw3 = 1500;
-    joy->sw4 = 1500;
-    joy->sw5 = 1500;
-    joy->sw6 = 1500;
-    joy->sw7 = 1500;
-    joy->sw8 = 1500;
+    joy->raw_aux1 = raw_sd;
+    joy->aux1 = apply_epa_rev(raw_sd, 4);
+
+    joy->raw_aux2 = raw_sb;
+    joy->aux2 = apply_epa_rev(raw_sb, 5);
+
+    joy->raw_aux3 = raw_sc;
+    joy->aux3 = apply_epa_rev(raw_sc, 6);
+
+    joy->raw_aux4 = raw_sa;
+    joy->aux4 = apply_epa_rev(raw_sa, 7);
+
+    // CH9~CH16 无实体开关，固定中位，同样过 EPA/REV
+    joy->sw1 = apply_epa_rev(1500, 8);
+    joy->sw2 = apply_epa_rev(1500, 9);
+    joy->sw3 = apply_epa_rev(1500, 10);
+    joy->sw4 = apply_epa_rev(1500, 11);
+    joy->sw5 = apply_epa_rev(1500, 12);
+    joy->sw6 = apply_epa_rev(1500, 13);
+    joy->sw7 = apply_epa_rev(1500, 14);
+    joy->sw8 = apply_epa_rev(1500, 15);
 }
 
 void ADC_TASK(void *arg)

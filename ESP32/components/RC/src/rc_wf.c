@@ -504,8 +504,18 @@ bool get_saved_crsf_link_mode(bool *half_duplex)
 // =================================================================================
 // ⭐ NVS 存储功能 (必须写在被调用之前)
 // =================================================================================
-// 把内存里的 limit 数组保存到 Flash
-void save_settings_to_nvs(void) {
+static volatile bool nvs_dirty = false;
+
+// WebSocket handler 只标记，不阻塞
+void request_nvs_save(void) {
+    nvs_dirty = true;
+}
+
+// 广播任务里实际写 Flash (50ms 周期检查，不阻塞 WS 通信)
+static void do_nvs_save(void) {
+    if (!nvs_dirty) return;
+    nvs_dirty = false;
+
     nvs_handle_t my_handle;
     esp_err_t err = nvs_open("storage", NVS_READWRITE, &my_handle);
     if (err == ESP_OK) {
@@ -515,7 +525,6 @@ void save_settings_to_nvs(void) {
         esp_err_t err_epa_pos = nvs_set_blob(my_handle, "epa_pos", epa_pos, sizeof(epa_pos));
         esp_err_t err_epa_neg = nvs_set_blob(my_handle, "epa_neg", epa_neg, sizeof(epa_neg));
         esp_err_t err_rev = nvs_set_u16(my_handle, "rev_mask", rev_mask);
-        // 预留字段持久化
         esp_err_t err_chmap = nvs_set_blob(my_handle, "ch_map", ch_map, sizeof(ch_map));
         esp_err_t err_stick = nvs_set_u8(my_handle, "stick_mode", stick_mode);
         esp_err_t err_btn = nvs_set_blob(my_handle, "btn_cfg", btn_cfg, sizeof(btn_cfg));
@@ -725,7 +734,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 int mode = atoi(text + 2);
                 if (mode == SIM_MODE_DEFAULT || mode == SIM_MODE_XBOX) {
                     current_sim_mode = (sim_mode_t)mode;
-                    save_settings_to_nvs();
+                    request_nvs_save();
                     ESP_LOGI(TAG, "模式已更新为: %d", current_sim_mode);
                 } else {
                     ESP_LOGW(TAG, "收到非法模式值: %d", mode);
@@ -752,12 +761,12 @@ static esp_err_t ws_handler(httpd_req_t *req)
                     channel_str = strtok_r(NULL, ";", &saveptr1);
                 }
 
-                save_settings_to_nvs();
+                request_nvs_save();
                 ws_send_text(req, "CAL_OK");
                 ESP_LOGI(TAG, "校准数据已保存 (RAM+NVS，即时生效)");
             }
             else if (strcmp(text, "SAVE_NVS") == 0) {
-                save_settings_to_nvs();
+                request_nvs_save();
                 ESP_LOGI(TAG, "NVS 已保存");
             }
             else if (strcmp(text, "CRSF_REFRESH") == 0) {
@@ -778,14 +787,14 @@ static esp_err_t ws_handler(httpd_req_t *req)
                     crsf_set_link_mode(true);
                     s_saved_crsf_half_duplex = true;
                     s_has_saved_crsf_link_mode = true;
-                    save_settings_to_nvs();
+                    request_nvs_save();
                     ws_send_crsf_snapshot(req);
                 } else if (strcasecmp(mode, "DUAL") == 0) {
                     ESP_LOGW(TAG, "网页命令 link: 切换为双线模式");
                     crsf_set_link_mode(false);
                     s_saved_crsf_half_duplex = false;
                     s_has_saved_crsf_link_mode = true;
-                    save_settings_to_nvs();
+                    request_nvs_save();
                     ws_send_crsf_snapshot(req);
                 } else {
                     ESP_LOGW(TAG, "非法 CRSF_LINK 指令: %s", text);
@@ -848,7 +857,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
                     ch >= 1 && ch <= 16 && pos >= 0 && pos <= 200 && neg >= 0 && neg <= 200) {
                     epa_pos[ch - 1] = (uint8_t)pos;
                     epa_neg[ch - 1] = (uint8_t)neg;
-                    save_settings_to_nvs();
+                    request_nvs_save();
                     ESP_LOGI(TAG, "EPA CH%d: pos=%d neg=%d", ch, pos, neg);
                 } else {
                     ESP_LOGW(TAG, "非法 EPA 指令: %s", text);
@@ -862,7 +871,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
                         rev_mask |= (1 << (ch - 1));
                     else
                         rev_mask &= ~(1 << (ch - 1));
-                    save_settings_to_nvs();
+                    request_nvs_save();
                     ESP_LOGI(TAG, "REV CH%d: %s", ch, val ? "REV" : "NOR");
                 } else {
                     ESP_LOGW(TAG, "非法 REV 指令: %s", text);
@@ -986,6 +995,7 @@ static void ws_broadcast_task(void *arg)
                 }
             }
         }
+        do_nvs_save();
         vTaskDelay(pdMS_TO_TICKS(50)); // 20Hz 刷新率
     }
 }
