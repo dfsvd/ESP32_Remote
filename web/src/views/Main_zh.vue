@@ -157,6 +157,7 @@
             v-if="configSubTab === 'mapping'"
             :mappings="channelMapping"
             :switch-options="availableSwitches"
+            :write-state="mapWriteState"
             :t="mappingT"
             @write="writeChannelMapping"
             @reset="resetChannelMapping"
@@ -227,7 +228,7 @@ const {
   leftStick, rightStick, visibleChannels,
   isDarkMode, toggleTheme,
   changeLanguage, saveCalibration, setStickMode,
-  updateChannelMapping, resetChannelMapping, writeChannelMapping,
+  mapWriteState, updateChannelMapping, resetChannelMapping, writeChannelMapping,
   refreshCrsf, handleCrsfBind, handleCrsfCommand, handleCrsfSelectChange,
   onCalibrationResult, onWsData, requestCalibration,
   setEpa, setRev,
@@ -262,6 +263,16 @@ const mappingT = {
   columnChannel: '通道',
   columnDefault: '默认值',
   columnCurrent: '当前值',
+  confirmWrite: '确认写入？',
+  confirmReset: '确认还原？',
+  confirmWriteDesc: '将当前通道映射写入设备',
+  confirmResetDesc: '恢复为默认通道映射',
+  confirmOk: '确定',
+  confirmCancel: '取消',
+  sendingWrite: '写入中...',
+  sendingReset: '还原中...',
+  doneWrite: '写入完成',
+  doneReset: '还原完成',
 }
 
 const stickT = {

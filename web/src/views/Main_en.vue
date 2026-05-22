@@ -155,6 +155,7 @@
             v-if="configSubTab === 'mapping'"
             :mappings="channelMapping"
             :switch-options="availableSwitches"
+            :write-state="mapWriteState"
             :t="mappingT"
             @write="writeChannelMapping"
             @reset="resetChannelMapping"
@@ -223,7 +224,7 @@ const {
   leftStick, rightStick, visibleChannels,
   isDarkMode, toggleTheme,
   changeLanguage, saveCalibration, setStickMode,
-  updateChannelMapping, resetChannelMapping, writeChannelMapping,
+  mapWriteState, updateChannelMapping, resetChannelMapping, writeChannelMapping,
   refreshCrsf, handleCrsfBind, handleCrsfCommand, handleCrsfSelectChange,
   onCalibrationResult, onWsData, requestCalibration,
   setEpa, setRev,
@@ -258,6 +259,16 @@ const mappingT = {
   columnChannel: 'Channel',
   columnDefault: 'Default',
   columnCurrent: 'Current',
+  confirmWrite: 'Confirm Write?',
+  confirmReset: 'Confirm Reset?',
+  confirmWriteDesc: 'Write current channel mapping to device',
+  confirmResetDesc: 'Restore default channel mapping',
+  confirmOk: 'OK',
+  confirmCancel: 'Cancel',
+  sendingWrite: 'Writing...',
+  sendingReset: 'Resetting...',
+  doneWrite: 'Write Complete',
+  doneReset: 'Reset Complete',
 }
 
 const stickT = {

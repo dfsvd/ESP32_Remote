@@ -725,6 +725,19 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 httpd_ws_frame_t rev_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)rev_buf, .len = strlen(rev_buf) };
                 httpd_ws_send_frame(req, &rev_pkt);
 
+                // 下发 MAP 数据
+                char map_buf[256] = "MAP:";
+                int map_off = 4;
+                for (int i = 0; i < 16; i++) {
+                    int w = snprintf(map_buf + map_off, sizeof(map_buf) - map_off,
+                                     "%d,%d%s", i + 1, ch_map[i],
+                                     (i == 15) ? "\n" : ";");
+                    if (w < 0 || w >= (int)(sizeof(map_buf) - map_off)) break;
+                    map_off += w;
+                }
+                httpd_ws_frame_t map_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)map_buf, .len = strlen(map_buf) };
+                httpd_ws_send_frame(req, &map_pkt);
+
                 ws_send_crsf_snapshot(req);
                 ESP_LOGI(TAG, "模式和配置下发完毕！");
             }
@@ -733,7 +746,9 @@ static esp_err_t ws_handler(httpd_req_t *req)
             else if (strncmp(text, "M:", 2) == 0) {
                 int mode = atoi(text + 2);
                 if (mode == SIM_MODE_DEFAULT || mode == SIM_MODE_XBOX) {
+                    portENTER_CRITICAL(&cfg_lock);
                     current_sim_mode = (sim_mode_t)mode;
+                    portEXIT_CRITICAL(&cfg_lock);
                     request_nvs_save();
                     ESP_LOGI(TAG, "模式已更新为: %d", current_sim_mode);
                 } else {
@@ -749,6 +764,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 char *saveptr1;
                 char *channel_str = strtok_r(payload_data, ";", &saveptr1);
 
+                portENTER_CRITICAL(&cfg_lock);
                 while (channel_str != NULL) {
                     int ch, min, mid, max;
                     if (sscanf(channel_str, "%d,%d,%d,%d", &ch, &min, &mid, &max) == 4) {
@@ -760,6 +776,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
                     }
                     channel_str = strtok_r(NULL, ";", &saveptr1);
                 }
+                portEXIT_CRITICAL(&cfg_lock);
 
                 request_nvs_save();
                 ws_send_text(req, "CAL_OK");
@@ -855,8 +872,10 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 int ch, pos, neg;
                 if (sscanf(text + 4, "%d,%d,%d", &ch, &pos, &neg) == 3 &&
                     ch >= 1 && ch <= 16 && pos >= 0 && pos <= 200 && neg >= 0 && neg <= 200) {
+                    portENTER_CRITICAL(&cfg_lock);
                     epa_pos[ch - 1] = (uint8_t)pos;
                     epa_neg[ch - 1] = (uint8_t)neg;
+                    portEXIT_CRITICAL(&cfg_lock);
                     request_nvs_save();
                     ESP_LOGI(TAG, "EPA CH%d: pos=%d neg=%d", ch, pos, neg);
                 } else {
@@ -867,15 +886,56 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 int ch, val;
                 if (sscanf(text + 4, "%d,%d", &ch, &val) == 2 &&
                     ch >= 1 && ch <= 16 && (val == 0 || val == 1)) {
+                    portENTER_CRITICAL(&cfg_lock);
                     if (val)
                         rev_mask |= (1 << (ch - 1));
                     else
                         rev_mask &= ~(1 << (ch - 1));
+                    portEXIT_CRITICAL(&cfg_lock);
                     request_nvs_save();
                     ESP_LOGI(TAG, "REV CH%d: %s", ch, val ? "REV" : "NOR");
                 } else {
                     ESP_LOGW(TAG, "非法 REV 指令: %s", text);
                 }
+            }
+
+            // ---- MAP 通道映射 ----
+            else if (strncmp(text, "MAP:", 4) == 0) {
+                char *payload = text + 4;
+                char *saveptr;
+                char *segment = strtok_r(payload, ";", &saveptr);
+                uint8_t new_map[16];
+                memcpy(new_map, ch_map, sizeof(new_map));
+
+                while (segment != NULL) {
+                    int ch, src;
+                    if (sscanf(segment, "%d,%d", &ch, &src) == 2 &&
+                        ch >= 1 && ch <= 16) {
+                        new_map[ch - 1] = (uint8_t)src;
+                    } else {
+                        // 尝试解析字符串源名
+                        char src_str[8] = {0};
+                        if (sscanf(segment, "%d,%7s", &ch, src_str) == 2 &&
+                            ch >= 1 && ch <= 16) {
+                            uint8_t src_idx = 0xFF;
+                            if (strcasecmp(src_str, "SW1") == 0) src_idx = 4;
+                            else if (strcasecmp(src_str, "SW2") == 0) src_idx = 5;
+                            else if (strcasecmp(src_str, "SW3") == 0) src_idx = 6;
+                            else if (strcasecmp(src_str, "SW4") == 0) src_idx = 7;
+                            else if (strcasecmp(src_str, "NONE") == 0) src_idx = 0xFF;
+                            if (src_idx != 0xFF || strcasecmp(src_str, "NONE") == 0)
+                                new_map[ch - 1] = src_idx;
+                        }
+                    }
+                    segment = strtok_r(NULL, ";", &saveptr);
+                }
+
+                portENTER_CRITICAL(&cfg_lock);
+                memcpy(ch_map, new_map, sizeof(ch_map));
+                portEXIT_CRITICAL(&cfg_lock);
+                request_nvs_save();
+                ws_send_text(req, "MAP_OK\n");
+                ESP_LOGI(TAG, "MAP 已更新");
             }
         }
 

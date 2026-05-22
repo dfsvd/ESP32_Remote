@@ -324,6 +324,14 @@ function onCalibrationResult(results) {
         parseRev(line)
         return
       }
+      if (line.startsWith('MAP:')) {
+        parseMap(line)
+        return
+      }
+      if (line.startsWith('MAP_OK')) {
+        mapWriteState.value = 'ok'
+        return
+      }
       if (!parseModeLine(line)) {
         parseChannelsLine(line)
       }
@@ -388,6 +396,23 @@ function onCalibrationResult(results) {
     if (!isNaN(val)) revMask.value = val
   }
 
+  const SOURCE_NAMES = { 4: 'SW1', 5: 'SW2', 6: 'SW3', 7: 'SW4' }
+  const SOURCE_IDS   = { SW1: 4, SW2: 5, SW3: 6, SW4: 7 }
+
+  function parseMap(line) {
+    line.slice(4).split(';').forEach(segment => {
+      const parts = segment.split(',').map(p => p.trim())
+      if (parts.length < 2) return
+      const ch = parseInt(parts[0], 10)
+      const src = parseInt(parts[1], 10)
+      if (isNaN(ch) || isNaN(src)) return
+      const m = channelMapping.value.find(m => m.channel === ch)
+      if (m) {
+        m.current = SOURCE_NAMES[src] || (src < 16 ? String(src) : 'None')
+      }
+    })
+  }
+
   function parseModeLine(line) {
     const prefix = ['M:', 'MODE:', 'SIM_MODE:'].find(p => line.startsWith(p))
     if (!prefix) return false
@@ -428,6 +453,8 @@ function onCalibrationResult(results) {
   }
 
   // --- Channel Mapping Methods ---
+  const mapWriteState = ref('idle') // 'idle' | 'sending' | 'ok'
+
   function updateChannelMapping(idx, newSwitch) {
     if (idx >= 0 && idx < channelMapping.value.length) {
       channelMapping.value[idx].current = newSwitch
@@ -436,11 +463,16 @@ function onCalibrationResult(results) {
 
   function resetChannelMapping() {
     channelMapping.value.forEach(m => { m.current = m.default })
+    if (!ws.value) return
+    const cmd = 'MAP:' + channelMapping.value.map(m => `${m.channel},${m.current}`).join(';')
+    mapWriteState.value = 'sending'
+    ws.value.sendData(cmd)
   }
 
   function writeChannelMapping() {
     if (!ws.value) return
     const cmd = 'MAP:' + channelMapping.value.map(m => `${m.channel},${m.current}`).join(';')
+    mapWriteState.value = 'sending'
     ws.value.sendData(cmd)
   }
 
@@ -506,6 +538,7 @@ function onCalibrationResult(results) {
     onCalibrationResult,
     onWsData,
     requestCalibration,
+    mapWriteState,
     updateChannelMapping,
     resetChannelMapping,
     writeChannelMapping,

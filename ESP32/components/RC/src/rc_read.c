@@ -32,6 +32,8 @@ uint8_t ch_map[16] = {0,1,2,3,4,5,6,7, 8,9,10,11,12,13,14,15};
 uint8_t stick_mode = 2;
 uint8_t btn_cfg[4] = {0};
 
+portMUX_TYPE cfg_lock = portMUX_INITIALIZER_UNLOCKED;
+
 static const char *TAG = "ADC";
 
 static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
@@ -118,6 +120,45 @@ static uint16_t apply_epa_rev(uint16_t mapped, uint8_t ch) {
     return mapped;
 }
 
+// 将映射值和原始值写入 joy 结构体的对应字段
+static void set_channel(fpv_joystick_report_t *joy, uint8_t idx, uint16_t mapped, uint16_t raw) {
+    switch (idx) {
+        case 0: joy->roll = mapped; joy->raw_roll = raw; break;
+        case 1: joy->pitch = mapped; joy->raw_pitch = raw; break;
+        case 2: joy->throttle = mapped; joy->raw_throttle = raw; break;
+        case 3: joy->yaw = mapped; joy->raw_yaw = raw; break;
+        case 4: joy->aux1 = mapped; joy->raw_aux1 = raw; break;
+        case 5: joy->aux2 = mapped; joy->raw_aux2 = raw; break;
+        case 6: joy->aux3 = mapped; joy->raw_aux3 = raw; break;
+        case 7: joy->aux4 = mapped; joy->raw_aux4 = raw; break;
+        case 8:  joy->sw1 = mapped; break;
+        case 9:  joy->sw2 = mapped; break;
+        case 10: joy->sw3 = mapped; break;
+        case 11: joy->sw4 = mapped; break;
+        case 12: joy->sw5 = mapped; break;
+        case 13: joy->sw6 = mapped; break;
+        case 14: joy->sw7 = mapped; break;
+        case 15: joy->sw8 = mapped; break;
+    }
+}
+
+// 通道映射管道: 源数据 → ch_map 重映射 → EPA/REV → joy 结构体
+static void apply_ch_map_to_joy(fpv_joystick_report_t *joy, const uint16_t src[16], const uint16_t src_raw[16]) {
+    for (uint8_t i = 0; i < 16; i++) {
+        uint8_t s = ch_map[i];
+        uint16_t val, raw;
+        if (s < 16) {
+            val = src[s];
+            raw = src_raw[s];
+        } else {
+            val = 1500;
+            raw = 1500;
+        }
+        val = apply_epa_rev(val, i);
+        set_channel(joy, i, val, raw);
+    }
+}
+
 // =================================================================================
 // 滑动窗口均值滤波配置
 // =================================================================================
@@ -202,40 +243,21 @@ uint16_t read_3pos_switch(gpio_num_t gpio_up, gpio_num_t gpio_down) {
 }
 
 /**
- * @brief 填充开关通道 (CH5-CH8 实体开关, CH9-CH16 无)
- * @param joy 指向遥控器数据结构体的指针
+ * @brief 读取实体开关，填入源数组 (不经 EPA/REV，由 apply_ch_map_to_joy 统一处理)
+ * @param src     源映射值数组 (1000~2000)
+ * @param src_raw 源原始值数组 (开关无 ADC，与 src 相同)
  */
-void update_switch_channels(fpv_joystick_report_t *joy) {
-    // 4个实体按键/开关映射到 CH5~CH8 (aux1~aux4)
-    // SA(按键,GPIO38) → CH8 | SB(2段,GPIO37) → CH6
-    // SC(3段,GPIO39/40) → CH7 | SD(按键,GPIO36) → CH5
-    // raw 存原始开关值，输出值经过 EPA/REV 处理
-    uint16_t raw_sd = READ_KEY_SD;
-    uint16_t raw_sb = READ_KEY_SB;
-    uint16_t raw_sc = READ_KEY_SC;
-    uint16_t raw_sa = READ_KEY_SA;
+void update_switch_channels(uint16_t src[16], uint16_t src_raw[16]) {
+    // 4个实体开关 → 物理源索引 4~7
+    src[4] = READ_KEY_SD;  // SD → 物理源4
+    src[5] = READ_KEY_SB;  // SB → 物理源5
+    src[6] = READ_KEY_SC;  // SC → 物理源6
+    src[7] = READ_KEY_SA;  // SA → 物理源7
 
-    joy->raw_aux1 = raw_sd;
-    joy->aux1 = apply_epa_rev(raw_sd, 4);
-
-    joy->raw_aux2 = raw_sb;
-    joy->aux2 = apply_epa_rev(raw_sb, 5);
-
-    joy->raw_aux3 = raw_sc;
-    joy->aux3 = apply_epa_rev(raw_sc, 6);
-
-    joy->raw_aux4 = raw_sa;
-    joy->aux4 = apply_epa_rev(raw_sa, 7);
-
-    // CH9~CH16 无实体开关，固定中位，同样过 EPA/REV
-    joy->sw1 = apply_epa_rev(1500, 8);
-    joy->sw2 = apply_epa_rev(1500, 9);
-    joy->sw3 = apply_epa_rev(1500, 10);
-    joy->sw4 = apply_epa_rev(1500, 11);
-    joy->sw5 = apply_epa_rev(1500, 12);
-    joy->sw6 = apply_epa_rev(1500, 13);
-    joy->sw7 = apply_epa_rev(1500, 14);
-    joy->sw8 = apply_epa_rev(1500, 15);
+    src_raw[4] = src[4];
+    src_raw[5] = src[5];
+    src_raw[6] = src[6];
+    src_raw[7] = src[7];
 }
 
 void ADC_TASK(void *arg)
@@ -254,28 +276,29 @@ void ADC_TASK(void *arg)
     ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(handle, &cbs, NULL)); 
     ESP_ERROR_CHECK(adc_continuous_start(handle)); 
     key_init();
-    while (1) 
+    while (1)
     {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        while (1) 
+        // 源数组: ch_map 重映射前的 16 路物理源值
+        uint16_t src[16]     = {1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500};
+        uint16_t src_raw[16] = {1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500};
+
+        while (1)
         {
-            if(adc_continuous_read(handle, result, READ_LEN, &ret_num, 0) == ESP_OK) 
+            if(adc_continuous_read(handle, result, READ_LEN, &ret_num, 0) == ESP_OK)
             {
                 uint32_t num_parsed_samples = 0;
-                adc_continuous_data_t parsed_data[ret_num / SOC_ADC_DIGI_RESULT_BYTES]; 
+                adc_continuous_data_t parsed_data[ret_num / SOC_ADC_DIGI_RESULT_BYTES];
                 esp_err_t parse_ret = adc_continuous_parse_data(handle, result, ret_num, parsed_data, &num_parsed_samples);
-                
-                if (parse_ret == ESP_OK) 
-                {
-                    // ==========================================================
-                    // ⭐ 你的思路：先对这一批次的数据做“过采样求和”
-                    // ==========================================================
-                    uint32_t batch_sum[MAX_ADC_CH] = {0}; // 累加器
-                    uint8_t  batch_count[MAX_ADC_CH] = {0}; // 计数器
 
-                    for (int i = 0; i < num_parsed_samples; i++) 
+                if (parse_ret == ESP_OK)
+                {
+                    uint32_t batch_sum[MAX_ADC_CH] = {0};
+                    uint8_t  batch_count[MAX_ADC_CH] = {0};
+
+                    for (int i = 0; i < num_parsed_samples; i++)
                     {
-                        if (parsed_data[i].valid) 
+                        if (parsed_data[i].valid)
                         {
                             uint32_t ch = parsed_data[i].channel;
                             if (ch < MAX_ADC_CH) {
@@ -284,50 +307,48 @@ void ADC_TASK(void *arg)
                             }
                         }
                     }
-              
-                    // ==========================================================
-                    // ⭐ 对批次均值进行“滑动滤波”和“摇杆映射” (每个通道每轮只执行1次)
-                    // ==========================================================
-                    for (int ch = 0; ch < MAX_ADC_CH; ch++) 
-                    {
-                        if (batch_count[ch] > 0) 
-                        {
-                            // 1. 算出这一批次里，当前通道的平均值 (约 8 个数据的平均)
-                            uint16_t batch_avg = batch_sum[ch] / batch_count[ch];
 
-                            // 2. 把这个批次平均值，送入跨越时间周期的滑动窗口，得到最终平滑值
+                    for (int ch = 0; ch < MAX_ADC_CH; ch++)
+                    {
+                        if (batch_count[ch] > 0)
+                        {
+                            uint16_t batch_avg = batch_sum[ch] / batch_count[ch];
                             uint16_t final_raw = moving_average_filter(ch, batch_avg);
 
-                            // 3. 映射逻辑：现在每个通道每一轮只映射 1 次！极大减轻单片机负担！
-                          
+                            // 填入源数组 (只做 ADC→1000~2000 映射，不含 EPA/REV)
                             switch (ch)
                             {
                                 case ADC_roll:
-                                    joy->roll = apply_epa_rev(3000 - map_joystick(final_raw, limit[0]), 0);
-                                    joy->raw_roll = final_raw;
+                                    src[0] = 3000 - map_joystick(final_raw, limit[0]);
+                                    src_raw[0] = final_raw;
                                     break;
 
                                 case ADC_pitch:
-                                    joy->pitch = apply_epa_rev(map_joystick(final_raw, limit[1]), 1);
-                                    joy->raw_pitch = final_raw;
+                                    src[1] = map_joystick(final_raw, limit[1]);
+                                    src_raw[1] = final_raw;
                                     break;
 
                                 case ADC_throttle:
-                                    joy->throttle = apply_epa_rev(map_joystick(final_raw, limit[2]), 2);
-                                    joy->raw_throttle = final_raw;
+                                    src[2] = map_joystick(final_raw, limit[2]);
+                                    src_raw[2] = final_raw;
                                     break;
 
                                 case ADC_yaw:
-                                    joy->yaw = apply_epa_rev(3000 - map_joystick(final_raw, limit[3]), 3);
-                                    joy->raw_yaw = final_raw;
+                                    src[3] = 3000 - map_joystick(final_raw, limit[3]);
+                                    src_raw[3] = final_raw;
                                     break;
                             }
                         }
                     }
                 }
-            } 
-            update_switch_channels(joy);
-            vTaskDelay(1); 
+            }
+            // 读取开关 → 填 src[4..7]
+            update_switch_channels(src, src_raw);
+            // ch_map 重映射 + EPA/REV → 写入 joy 结构体 (临界区: 不可与写入者交错)
+            portENTER_CRITICAL(&cfg_lock);
+            apply_ch_map_to_joy(joy, src, src_raw);
+            portEXIT_CRITICAL(&cfg_lock);
+            vTaskDelay(1);
         }
     }
 }

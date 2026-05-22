@@ -108,6 +108,9 @@ extern uint8_t stick_mode;
 //   SB/SC: 0=三态 1=二态
 extern uint8_t btn_cfg[4];
 
+// 共享配置自旋锁: 保护 ch_map / epa / rev / stick_mode / btn_cfg / limit
+extern portMUX_TYPE cfg_lock;
+
 void ADC_TASK(void *arg);
 
 #ifdef __cplusplus
