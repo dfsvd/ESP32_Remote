@@ -1,11 +1,28 @@
 {
-  "idf.currentSetup": "D:/Program/Development/Espressif/frameworks/esp-idf-v5.5.2/",
-  "idf.portWin": "COM5",
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "C_Cpp.errorSquiggles": "disabled",
+  "C_Cpp.autocomplete": "disabled",
+  "idf.espIdfPathWin": "D:/Program/Development/Espressif/frameworks/esp-idf-v5.5.2/",
+  "idf.toolsPathWin": "D:\\Program\\Development\\Espressif",
+  "idf.portWin": "COM3",
+  "idf.espIdfPath": "/home/xinian/esp/esp-idf",
+  "idf.toolsPath": "/home/xinian/.espressif",
+  "idf.pythonBinPath": "/home/xinian/.espressif/python_env/idf5.5_py3.14_env/bin/python",
+  "idf.port": "/dev/ttyUSB0",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
   "idf.flashType": "UART",
-  "clangd.path": "D:\\Program\\Development\\Espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.path": "clangd",
   "clangd.arguments": [
     "--background-index",
-    "--query-driver=**",
-    "--compile-commands-dir=d:\\UserData\\Desktop\\tusb_hid_2+ble\\tusb_hid_2+ble\\tusb_hid\\ESP32\\build"
-  ]
+    "--query-driver=/home/xinian/.espressif/tools/**/bin/*",
+    "--compile-commands-dir=${workspaceFolder}/build",
+    "--clang-tidy",
+    "--header-insertion=iwyu"
+  ],
+  "idf.currentSetup": "/home/xinian/esp/esp-idf"
 }
