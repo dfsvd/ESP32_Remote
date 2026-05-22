@@ -512,21 +512,32 @@ void save_settings_to_nvs(void) {
         esp_err_t err_cal = nvs_set_blob(my_handle, "cal_data", limit, sizeof(limit));
         esp_err_t err_mode = nvs_set_u8(my_handle, "sim_mode", (uint8_t)current_sim_mode);
         esp_err_t err_crsf = nvs_set_u8(my_handle, "crsf_half", s_saved_crsf_half_duplex ? 1 : 0);
+        esp_err_t err_epa_pos = nvs_set_blob(my_handle, "epa_pos", epa_pos, sizeof(epa_pos));
+        esp_err_t err_epa_neg = nvs_set_blob(my_handle, "epa_neg", epa_neg, sizeof(epa_neg));
+        esp_err_t err_rev = nvs_set_u16(my_handle, "rev_mask", rev_mask);
+        // 预留字段持久化
+        esp_err_t err_chmap = nvs_set_blob(my_handle, "ch_map", ch_map, sizeof(ch_map));
+        esp_err_t err_stick = nvs_set_u8(my_handle, "stick_mode", stick_mode);
+        esp_err_t err_btn = nvs_set_blob(my_handle, "btn_cfg", btn_cfg, sizeof(btn_cfg));
 
-        if (err_cal == ESP_OK && err_mode == ESP_OK && err_crsf == ESP_OK) {
+        bool all_ok = (err_cal == ESP_OK && err_mode == ESP_OK && err_crsf == ESP_OK &&
+                       err_epa_pos == ESP_OK && err_epa_neg == ESP_OK && err_rev == ESP_OK &&
+                       err_chmap == ESP_OK && err_stick == ESP_OK && err_btn == ESP_OK);
+
+        if (all_ok) {
             esp_err_t err_commit = nvs_commit(my_handle);
             if (err_commit == ESP_OK) {
-                ESP_LOGI(
-                    TAG,
-                    "💾 校准/模式/链路已保存: sim=%d wire=%s",
+                ESP_LOGI(TAG, "💾 设置已保存: sim=%d wire=%s rev=0x%04x",
                     (int)current_sim_mode,
-                    s_saved_crsf_half_duplex ? "single" : "dual");
+                    s_saved_crsf_half_duplex ? "single" : "dual",
+                    rev_mask);
             } else {
                 ESP_LOGE(TAG, "❌ NVS commit 失败");
             }
         } else {
-            ESP_LOGE(TAG, "❌ 保存失败: cal=%s, mode=%s, crsf=%s",
-                     esp_err_to_name(err_cal), esp_err_to_name(err_mode), esp_err_to_name(err_crsf));
+            ESP_LOGE(TAG, "❌ 保存失败: cal=%s mode=%s crsf=%s epa_p=%s epa_n=%s rev=%s",
+                     esp_err_to_name(err_cal), esp_err_to_name(err_mode), esp_err_to_name(err_crsf),
+                     esp_err_to_name(err_epa_pos), esp_err_to_name(err_epa_neg), esp_err_to_name(err_rev));
         }
 
         nvs_close(my_handle);
@@ -545,6 +556,20 @@ void load_settings_from_nvs() {
         esp_err_t err_mode = nvs_get_u8(my_handle, "sim_mode", (uint8_t*)&current_sim_mode);
         uint8_t crsf_half = 0;
         esp_err_t err_crsf = nvs_get_u8(my_handle, "crsf_half", &crsf_half);
+
+        // EPA/REV
+        size_t epa_size = sizeof(epa_pos);
+        nvs_get_blob(my_handle, "epa_pos", epa_pos, &epa_size);
+        epa_size = sizeof(epa_neg);
+        nvs_get_blob(my_handle, "epa_neg", epa_neg, &epa_size);
+        nvs_get_u16(my_handle, "rev_mask", &rev_mask);
+
+        // 预留字段
+        size_t chmap_size = sizeof(ch_map);
+        nvs_get_blob(my_handle, "ch_map", ch_map, &chmap_size);
+        nvs_get_u8(my_handle, "stick_mode", &stick_mode);
+        size_t btn_size = sizeof(btn_cfg);
+        nvs_get_blob(my_handle, "btn_cfg", btn_cfg, &btn_size);
 
         if (err_cal == ESP_OK) {
             ESP_LOGI(TAG, "📂 从 Flash 成功加载校准数据！");
@@ -671,6 +696,26 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 cal_pkt.type = HTTPD_WS_TYPE_TEXT;
 
                 httpd_ws_send_frame(req, &cal_pkt);
+
+                // 下发 EPA 数据 (EPA:ch,pos,neg;...)
+                char epa_buf[384] = "EPA:";
+                int epa_off = 4;
+                for (int i = 0; i < 16; i++) {
+                    int w = snprintf(epa_buf + epa_off, sizeof(epa_buf) - epa_off,
+                                     "%d,%d,%d%s", i + 1, epa_pos[i], epa_neg[i],
+                                     (i == 15) ? "\n" : ";");
+                    if (w < 0 || w >= (int)(sizeof(epa_buf) - epa_off)) break;
+                    epa_off += w;
+                }
+                httpd_ws_frame_t epa_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)epa_buf, .len = strlen(epa_buf) };
+                httpd_ws_send_frame(req, &epa_pkt);
+
+                // 下发 REV 数据
+                char rev_buf[32];
+                snprintf(rev_buf, sizeof(rev_buf), "REV:%u\n", rev_mask);
+                httpd_ws_frame_t rev_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)rev_buf, .len = strlen(rev_buf) };
+                httpd_ws_send_frame(req, &rev_pkt);
+
                 ws_send_crsf_snapshot(req);
                 ESP_LOGI(TAG, "模式和配置下发完毕！");
             }
@@ -708,17 +753,12 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 }
 
                 save_settings_to_nvs();
-                vTaskDelay(pdMS_TO_TICKS(100));
                 ws_send_text(req, "CAL_OK");
-                ESP_LOGI(TAG, "校准数据已保存");
-                vTaskDelay(pdMS_TO_TICKS(200));
-                esp_restart();
+                ESP_LOGI(TAG, "校准数据已保存 (RAM+NVS，即时生效)");
             }
             else if (strcmp(text, "SAVE_NVS") == 0) {
                 save_settings_to_nvs();
-                ESP_LOGI(TAG, "保存 NVS 并重启...");
-                vTaskDelay(pdMS_TO_TICKS(300));
-                esp_restart();
+                ESP_LOGI(TAG, "NVS 已保存");
             }
             else if (strcmp(text, "CRSF_REFRESH") == 0) {
                 ESP_LOGI(TAG, "网页命令 refresh: 请求刷新 CRSF 菜单");
@@ -781,6 +821,51 @@ static esp_err_t ws_handler(httpd_req_t *req)
                     crsf_write_menu_value((uint8_t)param_id, 1);
                 } else {
                     ESP_LOGW(TAG, "非法 CRSF_COMMAND 指令: %s", text);
+                }
+            }
+
+            // ---- EPA/REV 命令 ----
+            else if (strcmp(text, "EPA_READ") == 0) {
+                char epa_buf[384] = "EPA:";
+                int epa_off = 4;
+                for (int i = 0; i < 16; i++) {
+                    int w = snprintf(epa_buf + epa_off, sizeof(epa_buf) - epa_off,
+                                     "%d,%d,%d%s", i + 1, epa_pos[i], epa_neg[i],
+                                     (i == 15) ? "\n" : ";");
+                    if (w < 0 || w >= (int)(sizeof(epa_buf) - epa_off)) break;
+                    epa_off += w;
+                }
+                ws_send_text(req, epa_buf);
+            }
+            else if (strcmp(text, "REV_READ") == 0) {
+                char rev_buf[32];
+                snprintf(rev_buf, sizeof(rev_buf), "REV:%u\n", rev_mask);
+                ws_send_text(req, rev_buf);
+            }
+            else if (strncmp(text, "EPA:", 4) == 0) {
+                int ch, pos, neg;
+                if (sscanf(text + 4, "%d,%d,%d", &ch, &pos, &neg) == 3 &&
+                    ch >= 1 && ch <= 16 && pos >= 0 && pos <= 200 && neg >= 0 && neg <= 200) {
+                    epa_pos[ch - 1] = (uint8_t)pos;
+                    epa_neg[ch - 1] = (uint8_t)neg;
+                    save_settings_to_nvs();
+                    ESP_LOGI(TAG, "EPA CH%d: pos=%d neg=%d", ch, pos, neg);
+                } else {
+                    ESP_LOGW(TAG, "非法 EPA 指令: %s", text);
+                }
+            }
+            else if (strncmp(text, "REV:", 4) == 0) {
+                int ch, val;
+                if (sscanf(text + 4, "%d,%d", &ch, &val) == 2 &&
+                    ch >= 1 && ch <= 16 && (val == 0 || val == 1)) {
+                    if (val)
+                        rev_mask |= (1 << (ch - 1));
+                    else
+                        rev_mask &= ~(1 << (ch - 1));
+                    save_settings_to_nvs();
+                    ESP_LOGI(TAG, "REV CH%d: %s", ch, val ? "REV" : "NOR");
+                } else {
+                    ESP_LOGW(TAG, "非法 REV 指令: %s", text);
                 }
             }
         }
@@ -1014,6 +1099,11 @@ void rc_wifi_server_init(fpv_joystick_report_t *joy)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    // 提升 TCP 吞吐量: 关闭省电、增大带宽、延长 AP 超时
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT40);
+    esp_wifi_set_inactive_time(WIFI_IF_AP, 65535);
 
     ESP_LOGI(TAG, "WiFi AP 启动完成. SSID:%s", wifi_config.ap.ssid);
 

@@ -90,6 +90,24 @@ typedef struct {
 #define READ_KEY_FIXED4 1500
 
 extern channel_cal_t limit[16];
+
+// EPA 行程调节：每通道正/负行程百分比 (默认 100 = 100%)
+extern uint8_t epa_pos[16];
+extern uint8_t epa_neg[16];
+
+// REV 反向：位掩码 bit0=CH1 ... bit15=CH16 (0=NOR, 1=REV)
+extern uint16_t rev_mask;
+
+// --- 预留字段 (后期实装) ---
+// 通道映射: ch_map[dst_ch] = src_physical, 0xFF 表示禁用
+extern uint8_t ch_map[16];
+// 摇杆模式: 1=日本手 2=美国手 3=Mode3 4=Mode4
+extern uint8_t stick_mode;
+// 按键触发模式: [0]=SA [1]=SB [2]=SC [3]=SD
+//   SA/SD: 0=单击 1=双击
+//   SB/SC: 0=三态 1=二态
+extern uint8_t btn_cfg[4];
+
 void ADC_TASK(void *arg);
 
 #ifdef __cplusplus

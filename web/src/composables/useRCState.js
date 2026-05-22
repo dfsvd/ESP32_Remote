@@ -84,6 +84,12 @@ const channels = ref(Array.from({ length: 16 }, (_, i) => ({
   cal: { min: 1000, mid: 1500, max: 2000 }
 })))
 
+// --- EPA/REV ---
+const epaData = ref(Array.from({ length: 16 }, (_, i) => ({
+  ch: i + 1, pos: 100, neg: 100
+})))
+const revMask = ref(0)
+
 // --- CRSF Label Map ---
 const crsfLabelMap = {
   "Packet Rate": { zh: "发包速率", en: "Packet Rate" },
@@ -310,6 +316,14 @@ function onCalibrationResult(results) {
         parseCalibration(line)
         return
       }
+      if (line.startsWith('EPA:')) {
+        parseEpa(line)
+        return
+      }
+      if (line.startsWith('REV:')) {
+        parseRev(line)
+        return
+      }
       if (!parseModeLine(line)) {
         parseChannelsLine(line)
       }
@@ -354,6 +368,24 @@ function onCalibrationResult(results) {
         ch.cal.max = max
       }
     })
+  }
+
+  function parseEpa(line) {
+    line.slice(4).split(';').forEach(segment => {
+      const parts = segment.split(',').map(p => parseInt(p.trim(), 10))
+      if (parts.length < 3) return
+      const [ch, pos, neg] = parts
+      const e = epaData.value.find(e => e.ch === ch)
+      if (e && !isNaN(pos) && !isNaN(neg)) {
+        e.pos = pos
+        e.neg = neg
+      }
+    })
+  }
+
+  function parseRev(line) {
+    const val = parseInt(line.slice(4).trim(), 10)
+    if (!isNaN(val)) revMask.value = val
   }
 
   function parseModeLine(line) {
@@ -417,6 +449,23 @@ function onCalibrationResult(results) {
     stickMode.value = mode
   }
 
+  function setEpa(ch, pos, neg) {
+    const e = epaData.value.find(e => e.ch === ch)
+    if (e) {
+      e.pos = pos
+      e.neg = neg
+    }
+    ws.value?.sendData(`EPA:${ch},${pos},${neg}`)
+  }
+
+  function setRev(ch, val) {
+    if (val)
+      revMask.value |= (1 << (ch - 1))
+    else
+      revMask.value &= ~(1 << (ch - 1))
+    ws.value?.sendData(`REV:${ch},${val ? 1 : 0}`)
+  }
+
   return {
     // state
     ws,
@@ -436,6 +485,8 @@ function onCalibrationResult(results) {
     crsfStatus,
     channels,
     crsfMenus,
+    epaData,
+    revMask,
 
     // computed
     leftStick,
@@ -459,5 +510,7 @@ function onCalibrationResult(results) {
     resetChannelMapping,
     writeChannelMapping,
     setStickMode,
+    setEpa,
+    setRev,
   }
 }

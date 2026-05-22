@@ -23,6 +23,15 @@ channel_cal_t limit[16] = {
     { 999, 1500, 2001 }  // CH16
 };
 
+uint8_t epa_pos[16] = {100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100};
+uint8_t epa_neg[16] = {100,100,100,100,100,100,100,100,100,100,100,100,100,100,100,100};
+uint16_t rev_mask = 0;
+
+// 预留字段
+uint8_t ch_map[16] = {0,1,2,3,4,5,6,7, 8,9,10,11,12,13,14,15};
+uint8_t stick_mode = 2;
+uint8_t btn_cfg[4] = {0};
+
 static const char *TAG = "ADC";
 
 static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
@@ -85,6 +94,30 @@ static uint16_t map_joystick(uint16_t raw, channel_cal_t cal) {
         return 1500 + (uint32_t)(raw - cal.raw_mid) * 500 / (cal.raw_max - cal.raw_mid);
     }
 }
+
+// EPA 行程缩放 + REV 反向，在 map_joystick 之后调用
+static uint16_t apply_epa_rev(uint16_t mapped, uint8_t ch) {
+    if (ch >= 16) return mapped;
+
+    // 1. REV 反向：绕 1500 镜像
+    if (rev_mask & (1 << ch)) {
+        mapped = 3000 - mapped;
+    }
+
+    // 2. EPA 行程缩放
+    int32_t offset = (int32_t)mapped - 1500;
+    uint8_t scale = (offset >= 0) ? epa_pos[ch] : epa_neg[ch];
+    if (scale != 100) {
+        offset = offset * scale / 100;
+        mapped = (uint16_t)(1500 + offset);
+    }
+
+    // 钳位在 1000~2000
+    if (mapped < 1000) mapped = 1000;
+    if (mapped > 2000) mapped = 2000;
+    return mapped;
+}
+
 // =================================================================================
 // 滑动窗口均值滤波配置
 // =================================================================================
@@ -261,22 +294,22 @@ void ADC_TASK(void *arg)
                             switch (ch)
                             {
                                 case ADC_roll:
-                                    joy->roll = 3000 - map_joystick(final_raw, limit[0]);
+                                    joy->roll = apply_epa_rev(3000 - map_joystick(final_raw, limit[0]), 0);
                                     joy->raw_roll = final_raw;
                                     break;
-                                    
-                                case ADC_pitch: 
-                                    joy->pitch = map_joystick(final_raw, limit[1]);
+
+                                case ADC_pitch:
+                                    joy->pitch = apply_epa_rev(map_joystick(final_raw, limit[1]), 1);
                                     joy->raw_pitch = final_raw;
                                     break;
-                                    
-                                case ADC_throttle: 
-                                    joy->throttle = map_joystick(final_raw, limit[2]);
+
+                                case ADC_throttle:
+                                    joy->throttle = apply_epa_rev(map_joystick(final_raw, limit[2]), 2);
                                     joy->raw_throttle = final_raw;
                                     break;
-                                    
+
                                 case ADC_yaw:
-                                    joy->yaw = 3000 - map_joystick(final_raw, limit[3]);
+                                    joy->yaw = apply_epa_rev(3000 - map_joystick(final_raw, limit[3]), 3);
                                     joy->raw_yaw = final_raw;
                                     break;
                             }

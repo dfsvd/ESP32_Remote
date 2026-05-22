@@ -109,14 +109,13 @@
           <!-- Channel Values Overview -->
           <article class="p-5 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
             <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ t.channelValues }}</h3>
-            <div class="grid grid-cols-2 gap-3">
-              <div v-for="ch in channels.slice(0, 8)" :key="ch.id" class="flex items-center justify-between p-3 border border-[var(--theme-border-light)] rounded-xl bg-[var(--theme-bg-subtle)]">
-                <span class="text-darwin-muted text-xs font-bold">CH{{ ch.id }}</span>
-                <div class="text-right">
-                  <strong class="text-sm text-[var(--theme-text)] block">{{ ch.mappedValue }}</strong>
-                  <span class="text-[0.6rem] text-darwin-muted">{{ percentLabel(ch.mappedValue) }}</span>
-                </div>
-              </div>
+            <div class="flex flex-col gap-1">
+              <ChannelBar
+                v-for="ch in visibleChannels"
+                :key="ch.id"
+                :channel-id="ch.id"
+                :mapped-value="ch.mappedValue"
+              />
             </div>
           </article>
         </div>
@@ -142,10 +141,14 @@
           <ConfigChannelProps
             v-if="configSubTab === 'props'"
             :channels="visibleChannels"
+            :epa-data="epaData"
+            :rev-mask="revMask"
             :t="configT"
             t-raw-label="RAW"
             @calibrate="showCalibrationModal = true"
             @save="saveCalibration(t)"
+            @update-epa="(ch, pos, neg) => setEpa(ch, pos, neg)"
+            @toggle-rev="(ch) => setRev(ch, !((revMask >> (ch - 1)) & 1))"
           />
 
           <ConfigChannelMapping
@@ -210,17 +213,20 @@ import CrsfConfiguratorPanel from '../components/CrsfConfiguratorPanel.vue'
 import ConfigChannelProps from '../components/ConfigChannelProps.vue'
 import ConfigChannelMapping from '../components/ConfigChannelMapping.vue'
 import ConfigStickMode from '../components/ConfigStickMode.vue'
+import ChannelBar from '../components/ChannelBar.vue'
 
 const {
   ws, isConnected, currentTab, configSubTab, currentLang, simMode,
   showCalibrationModal, stickMode, channelMapping, availableSwitches,
   isCrsfLoading, crsfStatus, channels, crsfMenus,
+  epaData, revMask,
   leftStick, rightStick, visibleChannels,
   isDarkMode, toggleTheme,
   changeLanguage, saveCalibration, setStickMode,
   updateChannelMapping, resetChannelMapping, writeChannelMapping,
   refreshCrsf, handleCrsfBind, handleCrsfCommand, handleCrsfSelectChange,
   onCalibrationResult, onWsData, requestCalibration,
+  setEpa, setRev,
 } = useRCState()
 
 currentLang.value = 'en'
@@ -292,8 +298,5 @@ const configNavItems = computed(() => [
   { id: 'crsf', label: 'CRSF' },
 ])
 
-function percentLabel(val) {
-  const pct = Math.round((val - 1500) / 5)
-  return (pct > 0 ? '+' : '') + pct + '%'
-}
+
 </script>

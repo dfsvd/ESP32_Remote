@@ -19,7 +19,7 @@
     </div>
 
     <!-- Channel Sliders -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+    <div class="flex flex-col gap-3">
       <AuxChannelSlider
         v-for="ch in channels"
         :key="ch.id"
@@ -27,7 +27,11 @@
         :mapped-value="ch.mappedValue"
         v-model:raw-value="ch.rawValue"
         :cal="ch.cal"
+        :epa="epaForChannel(ch.id)"
+        :rev-on="revForChannel(ch.id)"
         :t-raw-label="tRawLabel"
+        @update-epa="(chId, pos, neg) => $emit('updateEpa', chId, pos, neg)"
+        @toggle-rev="(chId) => $emit('toggleRev', chId)"
       />
     </div>
   </div>
@@ -36,11 +40,22 @@
 <script setup>
 import AuxChannelSlider from './AuxChannelSlider.vue'
 
-defineProps({
+const props = defineProps({
   channels: { type: Array, required: true },
+  epaData: { type: Array, default: () => [] },
+  revMask: { type: Number, default: 0 },
   t: { type: Object, required: true },
   tRawLabel: { type: String, default: 'RAW' }
 })
 
-defineEmits(['calibrate', 'save'])
+defineEmits(['calibrate', 'save', 'updateEpa', 'toggleRev'])
+
+function epaForChannel(ch) {
+  const e = props.epaData.find(e => e.ch === ch)
+  return e || { pos: 100, neg: 100 }
+}
+
+function revForChannel(ch) {
+  return (props.revMask & (1 << (ch - 1))) !== 0
+}
 </script>
