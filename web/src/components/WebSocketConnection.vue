@@ -13,7 +13,8 @@ const emit = defineEmits(['data', 'status', 'connected']);
 
 const isConnected = ref(false);
 const socket = ref(null);
-let reconnectInterval = null;
+let reconnectTimer = null;
+let reconnectDelay = 1000; // 初始 1s，加倍退避
 
 const getWsUrl = () => {
   const searchParams = new URLSearchParams(window.location.search);
@@ -34,6 +35,12 @@ const getWsUrl = () => {
 };
 
 const connect = () => {
+  // 关掉旧连接再建新的
+  if (socket.value) {
+    socket.value.onclose = null;
+    socket.value.close();
+    socket.value = null;
+  }
   console.log('Connecting to WebSocket...');
   try {
     socket.value = new WebSocket(getWsUrl());
@@ -43,9 +50,10 @@ const connect = () => {
       emit('status', true);
       emit('connected');
       console.log('WebSocket connected');
-      if (reconnectInterval) {
-        clearInterval(reconnectInterval);
-        reconnectInterval = null;
+      reconnectDelay = 1000; // 重置退避
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
       }
     };
 
@@ -61,15 +69,25 @@ const connect = () => {
       isConnected.value = false;
       emit('status', false);
       socket.value = null;
-      console.log('WebSocket disconnected. Attempting to reconnect...');
-      if (!reconnectInterval) {
-        reconnectInterval = setInterval(() => {
+      console.log('WebSocket disconnected. Reconnect in ' + reconnectDelay + 'ms');
+      if (!reconnectTimer) {
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
           connect();
-        }, 3000);
+        }, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000); // 加倍退避，上限 30s
       }
     };
   } catch (error) {
     console.error('Failed to create WebSocket:', error);
+    // 创建失败也要排队重试
+    if (!reconnectTimer) {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    }
   }
 };
 
@@ -88,7 +106,10 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  if (reconnectInterval) clearInterval(reconnectInterval);
-  if (socket.value) socket.value.close();
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (socket.value) {
+    socket.value.onclose = null;
+    socket.value.close();
+  }
 });
 </script>

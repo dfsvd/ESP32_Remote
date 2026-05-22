@@ -820,17 +820,17 @@ static void ws_broadcast_task(void *arg)
     uint8_t last_menu_loaded_params = 0xFF;
     uint8_t last_menu_total_params = 0xFF;
 
+    // 增量发送 + 保活：数据变时立即发，最长 1.5s 不发就强制发一次防 TCP 断开
+    char last_send_buf[512] = {0};
+    int silent_cycles = 0;
+
     while (1) {
-        // 确保 server 开启，并且 joy 指针不为空
         if (server != NULL && joy != NULL) {
-            
-            // 用一个巨大的 snprintf 将真实数据一次性填入！
-            // 格式要求：前8个是 "映射:原始"，后8个数字开关没有物理原始值，直接发 "映射:0"
-            snprintf(send_buf, sizeof(send_buf), 
-                "%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d," // CH1 ~ CH8 (带原始值)
-                "%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d\n",       // CH9 ~ CH16 (无原始值，补0)
-                
-                // 填入前 8 个模拟通道 (映射值, 原始值)
+
+            snprintf(send_buf, sizeof(send_buf),
+                "%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d," // CH1 ~ CH8
+                "%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d,%d:%d\n", // CH9 ~ CH16
+
                 joy->roll,     joy->raw_roll,
                 joy->pitch,    joy->raw_pitch,
                 joy->throttle, joy->raw_throttle,
@@ -839,35 +839,36 @@ static void ws_broadcast_task(void *arg)
                 joy->aux2,     joy->raw_aux2,
                 joy->aux3,     joy->raw_aux3,
                 joy->aux4,     joy->raw_aux4,
-                
-                // 填入后 8 个开关通道 (只有映射值)
-                joy->sw1,     joy->sw1, 
-                joy->sw2,     joy->sw2, 
-                joy->sw3,     joy->sw3, 
-                joy->sw4,     joy->sw4, 
-                joy->sw5,     joy->sw5, 
-                joy->sw6,     joy->sw6, 
-                joy->sw7,     joy->sw7, 
+
+                joy->sw1,     joy->sw1,
+                joy->sw2,     joy->sw2,
+                joy->sw3,     joy->sw3,
+                joy->sw4,     joy->sw4,
+                joy->sw5,     joy->sw5,
+                joy->sw6,     joy->sw6,
+                joy->sw7,     joy->sw7,
                 joy->sw8,     joy->sw8
             );
 
-            ws_pkt.payload = (uint8_t*)send_buf;
-            ws_pkt.len = strlen(send_buf);
+            bool changed = (strcmp(send_buf, last_send_buf) != 0);
 
-            size_t max_clients = 8;
-            int client_fds[8] = {0};
-            if (httpd_get_client_list(server, &max_clients, client_fds) == ESP_OK) {
-                for (int i = 0; i < max_clients; i++) {
-                    if (httpd_ws_get_fd_info(server, client_fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
-                        esp_err_t send_ret = httpd_ws_send_frame_async(server, client_fds[i], &ws_pkt);
-                        if (send_ret != ESP_OK) {
-                            ESP_LOGD(TAG, "跳过不可用的 WS 客户端 fd=%d ret=%s",
-                                     client_fds[i], esp_err_to_name(send_ret));
+            if (changed || ++silent_cycles >= 30) {
+                if (changed) silent_cycles = 0;
+                memcpy(last_send_buf, send_buf, sizeof(last_send_buf));
+
+                ws_pkt.payload = (uint8_t*)send_buf;
+                ws_pkt.len = strlen(send_buf);
+
+                size_t max_clients = 8;
+                int client_fds[8] = {0};
+                if (httpd_get_client_list(server, &max_clients, client_fds) == ESP_OK) {
+                    for (int i = 0; i < max_clients; i++) {
+                        if (httpd_ws_get_fd_info(server, client_fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+                            httpd_ws_send_frame_async(server, client_fds[i], &ws_pkt);
                         }
                     }
                 }
             }
-
             crsf_state_t *state = crsf_get_state();
             if (crsf_status_needs_broadcast(
                     state,
@@ -920,7 +921,8 @@ static void start_webserver(fpv_joystick_report_t *joy)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 10;
-    config.max_open_sockets = 7;
+    config.max_open_sockets = 13;
+    config.lru_purge_enable = true;
 
     ESP_LOGI(TAG, "启动 HTTP 服务器，端口: %d", config.server_port);
     if (httpd_start(&server, &config) == ESP_OK) {
