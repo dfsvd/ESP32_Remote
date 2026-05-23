@@ -242,6 +242,92 @@ uint16_t read_3pos_switch(gpio_num_t gpio_up, gpio_num_t gpio_down) {
     }
 }
 
+// SA/SD 按键触发状态 (per-pin)
+static struct {
+    int last_level;
+    int toggle;
+    int press_cnt;
+    TickType_t first_pt;
+} s_sa_sd[2];
+
+static int sa_sd_idx(gpio_num_t pin) {
+    return (pin == RC_SWITCH_SA_PIN) ? 1 : 0;
+}
+
+/**
+ * @brief SA/SD 自复位按键三模式读取
+ * @param pin  GPIO 编号
+ * @param mode 0=触摸(默认), 1=单击切换, 2=双击切换
+ * @return uint16_t 1000 或 2000
+ */
+static uint16_t read_sa_sd(gpio_num_t pin, uint8_t mode) {
+    int level = gpio_get_level(pin);
+    int idx = sa_sd_idx(pin);
+
+    if (mode == 0) {
+        // 触摸: 按住=2000, 松开=1000 (上拉输入，按下=0，松开=1)
+        s_sa_sd[idx].toggle = 0;
+        return level ? 1000 : 2000;
+    }
+
+    // 检测上升沿 (松开→按下)
+    if (s_sa_sd[idx].last_level == 0 && level == 1) {
+        if (mode == 1) {
+            // 单击: 每次按下翻转
+            s_sa_sd[idx].toggle = !s_sa_sd[idx].toggle;
+        } else if (mode == 2) {
+            // 双击: 500ms 内两次才翻转
+            TickType_t now = xTaskGetTickCount();
+            if (s_sa_sd[idx].press_cnt == 0 ||
+                (now - s_sa_sd[idx].first_pt) > pdMS_TO_TICKS(500)) {
+                s_sa_sd[idx].first_pt = now;
+                s_sa_sd[idx].press_cnt = 1;
+            } else {
+                s_sa_sd[idx].press_cnt++;
+                if (s_sa_sd[idx].press_cnt >= 2) {
+                    s_sa_sd[idx].toggle = !s_sa_sd[idx].toggle;
+                    s_sa_sd[idx].press_cnt = 0;
+                }
+            }
+        }
+    }
+    s_sa_sd[idx].last_level = level;
+    return s_sa_sd[idx].toggle ? 2000 : 1000;
+}
+
+// SC 3-pos 二态模式: 记录上次非中位值
+static struct {
+    gpio_num_t pin;
+    uint16_t last_non_mid;
+} s_sc_last = { GPIO_NUM_NC, 1500 };
+
+/**
+ * @brief SB/SC 拨码开关两模式读取
+ * @param pin1  主 GPIO (SB 唯一引脚, SC 上引脚)
+ * @param pin2  SC 下引脚; 0xFF 表示 2 段开关
+ * @param mode  0=三态(默认), 1=二态(中位归最近端)
+ * @return uint16_t 1000/1500/2000
+ */
+static uint16_t read_sb_sc(gpio_num_t pin1, gpio_num_t pin2, uint8_t mode) {
+    if (pin2 == 0xFF) {
+        // 2 段开关 (SB)
+        return read_2pos_switch(pin1, false);
+    }
+
+    if (mode == 0) {
+        return read_3pos_switch(pin1, pin2);
+    }
+
+    // 二态: 中位 → 最近的非中位值
+    int up_val = gpio_get_level(pin1);
+    int down_val = gpio_get_level(pin2);
+    if (s_sc_last.pin == GPIO_NUM_NC) s_sc_last.pin = pin1;
+
+    if (up_val == 0 && down_val == 1) { s_sc_last.last_non_mid = 2000; return 2000; }
+    if (up_val == 1 && down_val == 0) { s_sc_last.last_non_mid = 1000; return 1000; }
+    return s_sc_last.last_non_mid;
+}
+
 /**
  * @brief 读取实体开关，填入源数组 (不经 EPA/REV，由 apply_ch_map_to_joy 统一处理)
  * @param src     源映射值数组 (1000~2000)
@@ -249,10 +335,10 @@ uint16_t read_3pos_switch(gpio_num_t gpio_up, gpio_num_t gpio_down) {
  */
 void update_switch_channels(uint16_t src[16], uint16_t src_raw[16]) {
     // 4个实体开关 → 物理源索引 4~7
-    src[4] = READ_KEY_SD;  // SD → 物理源4
-    src[5] = READ_KEY_SB;  // SB → 物理源5
-    src[6] = READ_KEY_SC;  // SC → 物理源6
-    src[7] = READ_KEY_SA;  // SA → 物理源7
+    src[4] = read_sa_sd(RC_SWITCH_SA_PIN, btn_cfg[0]);  // SA → 物理源4
+    src[5] = read_sb_sc(RC_SWITCH_SB_PIN, 0xFF, btn_cfg[1]);  // SB → 物理源5
+    src[6] = read_sb_sc(RC_SWITCH_SC_UP_PIN, RC_SWITCH_SC_DOWN_PIN, btn_cfg[2]);  // SC → 物理源6
+    src[7] = read_sa_sd(RC_SWITCH_SD_PIN, btn_cfg[3]);  // SD → 物理源7
 
     src_raw[4] = src[4];
     src_raw[5] = src[5];
@@ -324,13 +410,23 @@ void ADC_TASK(void *arg)
                                     break;
 
                                 case ADC_pitch:
-                                    src[1] = map_joystick(final_raw, limit[1]);
-                                    src_raw[1] = final_raw;
+                                    if (stick_mode == 1) {
+                                        src[2] = map_joystick(final_raw, limit[1]);
+                                        src_raw[2] = final_raw;
+                                    } else {
+                                        src[1] = map_joystick(final_raw, limit[1]);
+                                        src_raw[1] = final_raw;
+                                    }
                                     break;
 
                                 case ADC_throttle:
-                                    src[2] = map_joystick(final_raw, limit[2]);
-                                    src_raw[2] = final_raw;
+                                    if (stick_mode == 1) {
+                                        src[1] = map_joystick(final_raw, limit[2]);
+                                        src_raw[1] = final_raw;
+                                    } else {
+                                        src[2] = map_joystick(final_raw, limit[2]);
+                                        src_raw[2] = final_raw;
+                                    }
                                     break;
 
                                 case ADC_yaw:

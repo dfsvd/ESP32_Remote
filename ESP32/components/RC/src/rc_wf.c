@@ -738,6 +738,19 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 httpd_ws_frame_t map_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)map_buf, .len = strlen(map_buf) };
                 httpd_ws_send_frame(req, &map_pkt);
 
+                // 下发 STICK_MODE
+                char stick_buf[32];
+                snprintf(stick_buf, sizeof(stick_buf), "STICK_MODE:%u\n", stick_mode);
+                httpd_ws_frame_t stick_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)stick_buf, .len = strlen(stick_buf) };
+                httpd_ws_send_frame(req, &stick_pkt);
+
+                // 下发 BTN (按键触发模式)
+                char btn_buf[32];
+                snprintf(btn_buf, sizeof(btn_buf), "BTN:%u,%u,%u,%u\n",
+                         btn_cfg[0], btn_cfg[1], btn_cfg[2], btn_cfg[3]);
+                httpd_ws_frame_t btn_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)btn_buf, .len = strlen(btn_buf) };
+                httpd_ws_send_frame(req, &btn_pkt);
+
                 ws_send_crsf_snapshot(req);
                 ESP_LOGI(TAG, "模式和配置下发完毕！");
             }
@@ -918,10 +931,10 @@ static esp_err_t ws_handler(httpd_req_t *req)
                         if (sscanf(segment, "%d,%7s", &ch, src_str) == 2 &&
                             ch >= 1 && ch <= 16) {
                             uint8_t src_idx = 0xFF;
-                            if (strcasecmp(src_str, "SW1") == 0) src_idx = 4;
-                            else if (strcasecmp(src_str, "SW2") == 0) src_idx = 5;
-                            else if (strcasecmp(src_str, "SW3") == 0) src_idx = 6;
-                            else if (strcasecmp(src_str, "SW4") == 0) src_idx = 7;
+                            if (strcasecmp(src_str, "SA") == 0) src_idx = 4;
+                            else if (strcasecmp(src_str, "SB") == 0) src_idx = 5;
+                            else if (strcasecmp(src_str, "SC") == 0) src_idx = 6;
+                            else if (strcasecmp(src_str, "SD") == 0) src_idx = 7;
                             else if (strcasecmp(src_str, "NONE") == 0) src_idx = 0xFF;
                             if (src_idx != 0xFF || strcasecmp(src_str, "NONE") == 0)
                                 new_map[ch - 1] = src_idx;
@@ -936,6 +949,39 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 request_nvs_save();
                 ws_send_text(req, "MAP_OK\n");
                 ESP_LOGI(TAG, "MAP 已更新");
+            }
+
+            // ---- STICK_MODE ----
+            else if (strncmp(text, "STICK_MODE:", 11) == 0) {
+                int mode = atoi(text + 11);
+                if (mode >= 1 && mode <= 4) {
+                    portENTER_CRITICAL(&cfg_lock);
+                    stick_mode = (uint8_t)mode;
+                    portEXIT_CRITICAL(&cfg_lock);
+                    request_nvs_save();
+                    ESP_LOGI(TAG, "STICK_MODE 已更新为: %d", stick_mode);
+                } else {
+                    ESP_LOGW(TAG, "非法 STICK_MODE: %d", mode);
+                }
+            }
+
+            // ---- BTN 按键触发模式 ----
+            else if (strncmp(text, "BTN:", 4) == 0) {
+                int sa, sb, sc, sd;
+                if (sscanf(text + 4, "%d,%d,%d,%d", &sa, &sb, &sc, &sd) == 4 &&
+                    sa >= 0 && sa <= 2 && sb >= 0 && sb <= 1 &&
+                    sc >= 0 && sc <= 1 && sd >= 0 && sd <= 2) {
+                    portENTER_CRITICAL(&cfg_lock);
+                    btn_cfg[0] = (uint8_t)sa;
+                    btn_cfg[1] = (uint8_t)sb;
+                    btn_cfg[2] = (uint8_t)sc;
+                    btn_cfg[3] = (uint8_t)sd;
+                    portEXIT_CRITICAL(&cfg_lock);
+                    request_nvs_save();
+                    ESP_LOGI(TAG, "BTN 已更新: SA=%d SB=%d SC=%d SD=%d", sa, sb, sc, sd);
+                } else {
+                    ESP_LOGW(TAG, "非法 BTN 指令: %s", text);
+                }
             }
         }
 

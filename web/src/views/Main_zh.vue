@@ -95,6 +95,28 @@
           </article>
         </div>
 
+        <!-- 按键模式设置 -->
+        <article class="p-5 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
+          <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ btnT.title }}</h3>
+          <div class="grid grid-cols-4 gap-3">
+            <div v-for="(btn, idx) in btnT.items" :key="idx" class="flex flex-col gap-1.5">
+              <span class="text-[0.65rem] text-darwin-muted font-bold">{{ btn.name }}</span>
+              <select
+                :value="btnCfg[idx]"
+                @change="setBtnCfg(idx, parseInt($event.target.value))"
+                class="px-3 py-2 text-sm rounded-lg bg-darwin-panel border border-[var(--theme-border)] text-darwin-ink outline-none cursor-pointer"
+              >
+                <option v-for="opt in btn.options" :key="opt.val" :value="opt.val">{{ opt.label }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="flex items-center gap-3 mt-3">
+            <button type="button" @click="resetBtnCfg"
+              class="px-4 py-1.5 text-xs font-bold rounded-full border border-[var(--theme-border)] text-darwin-muted"
+            >{{ btnT.reset }}</button>
+          </div>
+        </article>
+
         <!-- Joystick + Main Channels -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <!-- Joystick Section -->
@@ -144,10 +166,7 @@
             :channels="visibleChannels"
             :epa-data="epaData"
             :rev-mask="revMask"
-            :t="configT"
             t-raw-label="原始值"
-            @calibrate="showCalibrationModal = true"
-            @save="saveCalibration(t)"
             @update-epa="(ch, pos, neg) => setEpa(ch, pos, neg)"
             @toggle-rev="(ch) => setRev(ch, !((revMask >> (ch - 1)) & 1))"
           />
@@ -226,12 +245,14 @@ const {
   isCrsfLoading, crsfStatus, channels, crsfMenus,
   epaData, revMask,
   leftStick, rightStick, visibleChannels,
+  btnCfg,
   isDarkMode, toggleTheme,
-  changeLanguage, saveCalibration, setStickMode,
+  changeLanguage, setStickMode,
   mapWriteState, updateChannelMapping, resetChannelMapping, writeChannelMapping,
   refreshCrsf, handleCrsfBind, handleCrsfCommand, handleCrsfSelectChange,
   onCalibrationResult, onWsData, requestCalibration,
   setEpa, setRev,
+  setBtnCfg, resetBtnCfg,
 } = useRCState()
 
 currentLang.value = 'zh'
@@ -248,14 +269,9 @@ const t = {
   leftStick: '左摇杆',
   rightStick: '右摇杆',
   channelValues: '通道数值',
-  notConnectedAlert: '未连接到设备，无法保存。',
-  savedAlert: '模式与校准数据已发送。',
 }
 
-const configT = {
-  autoCalibration: '开始校准',
-  saveCalibration: '保存校准',
-}
+const configT = {}
 
 const mappingT = {
   write: '写入',
@@ -284,6 +300,43 @@ const stickT = {
   leftStick: '左摇杆',
   rightStick: '右摇杆',
   calibrate: '摇杆校准',
+}
+
+const btnT = {
+  title: '按键模式设置',
+  reset: '还原默认',
+  items: [
+    {
+      name: 'SA',
+      options: [
+        { val: 0, label: '触发' },
+        { val: 1, label: '单击' },
+        { val: 2, label: '双击' },
+      ],
+    },
+    {
+      name: 'SB',
+      options: [
+        { val: 0, label: '三态' },
+        { val: 1, label: '二态' },
+      ],
+    },
+    {
+      name: 'SC',
+      options: [
+        { val: 0, label: '三态' },
+        { val: 1, label: '二态' },
+      ],
+    },
+    {
+      name: 'SD',
+      options: [
+        { val: 0, label: '触发' },
+        { val: 1, label: '单击' },
+        { val: 2, label: '双击' },
+      ],
+    },
+  ],
 }
 
 const calT = {

@@ -51,15 +51,20 @@ const showCalibrationModal = ref(false)
 const configSubTab = ref('props') // 'props' | 'mapping' | 'stick'
 const stickMode = ref(STICK_MODE_2) // 默认美国手
 
+// --- 按键触发模式: [SA(索引0), SB(1), SC(2), SD(3)] ---
+// SA/SD: 0=触摸 1=单击 2=双击
+// SB/SC: 0=三态 1=二态
+const btnCfg = ref([0, 0, 0, 0])
+
 // --- Channel Mapping (switches only, CH5-CH8) ---
 const channelMapping = ref([
-  { channel: 5,  default: 'SW1', current: 'SW1' },
-  { channel: 6,  default: 'SW2', current: 'SW2' },
-  { channel: 7,  default: 'SW3', current: 'SW3' },
-  { channel: 8,  default: 'SW4', current: 'SW4' },
+  { channel: 5,  default: 'SA', current: 'SA' },
+  { channel: 6,  default: 'SB', current: 'SB' },
+  { channel: 7,  default: 'SC', current: 'SC' },
+  { channel: 8,  default: 'SD', current: 'SD' },
 ])
 
-const availableSwitches = ['SW1', 'SW2', 'SW3', 'SW4', 'None']
+const availableSwitches = ['SA', 'SB', 'SC', 'SD', 'None']
 
 // --- CRSF ---
 const isCrsfLoading = ref(false)
@@ -114,31 +119,32 @@ const crsfLabelMap = {
 }
 
 // --- Computed ---
-// Mode 1 (日本手): 左=Yaw(Y)+Pitch(X), 右=Roll(X)+Throttle(Y)
-// Mode 2 (美国手): 左=Yaw(X)+Throttle(Y), 右=Roll(X)+Pitch(Y)
+// Mode 2 (美国手): CH1=Roll, CH2=Pitch(右Y), CH3=Throttle(左Y), CH4=Yaw
+// Mode 1 (日本手): CH1=Roll, CH2=Throttle(左Y), CH3=Pitch(右Y), CH4=Yaw
+//   (ESP32 在 Mode 1 时交换了 src[1]/src[2], 所以左Y数据在 CH2, 右Y数据在 CH3)
 const leftStick = computed(() => {
   if (stickMode.value === STICK_MODE_1) {
     return {
-      x: (channels.value[1].mappedValue - 1500) / 5,  // CH2 Pitch
-      y: (channels.value[3].mappedValue - 1500) / 5,  // CH4 Yaw
+      x: (channels.value[3].mappedValue - 1500) / 5,  // CH4 Yaw = 左手柄 X
+      y: (channels.value[1].mappedValue - 1500) / 5,  // CH2 = 左手柄 Y (油门电位器)
     }
   }
   return {
-    x: (channels.value[3].mappedValue - 1500) / 5,  // CH4 Yaw
-    y: (channels.value[2].mappedValue - 1500) / 5,  // CH3 Throttle
+    x: (channels.value[3].mappedValue - 1500) / 5,  // CH4 Yaw = 左手柄 X
+    y: (channels.value[2].mappedValue - 1500) / 5,  // CH3 Throttle = 左手柄 Y
   }
 })
 
 const rightStick = computed(() => {
   if (stickMode.value === STICK_MODE_1) {
     return {
-      x: (channels.value[0].mappedValue - 1500) / 5,  // CH1 Roll
-      y: (channels.value[2].mappedValue - 1500) / 5,  // CH3 Throttle
+      x: (channels.value[0].mappedValue - 1500) / 5,  // CH1 Roll = 右手柄 X
+      y: (channels.value[2].mappedValue - 1500) / 5,  // CH3 = 右手柄 Y (俯仰电位器)
     }
   }
   return {
-    x: (channels.value[0].mappedValue - 1500) / 5,  // CH1 Roll
-    y: (channels.value[1].mappedValue - 1500) / 5,  // CH2 Pitch
+    x: (channels.value[0].mappedValue - 1500) / 5,  // CH1 Roll = 右手柄 X
+    y: (channels.value[1].mappedValue - 1500) / 5,  // CH2 Pitch = 右手柄 Y
   }
 })
 
@@ -206,16 +212,6 @@ export function useRCState() {
     _router.push('/' + lang)
   }
 
-  function saveCalibration(t) {
-    if (!ws.value) {
-      window.alert(t.notConnectedAlert)
-      return
-    }
-    ws.value.sendData(`M:${simMode.value}`)
-    ws.value.sendData('SAVE_NVS')
-    window.alert(t.savedAlert)
-  }
-
   function refreshCrsf() {
     isCrsfLoading.value = true
     ws.value?.sendData('CRSF_REFRESH')
@@ -266,12 +262,13 @@ function onCalibrationResult(results) {
       ch.cal.max = cal.max
     }
   })
-  // 2. 发给 ESP32 更新内存中的 limit[]，下个 ADC 周期映射值就对了
+  // 2. 发给 ESP32 更新 limit[] + 持久化到 NVS
   if (ws.value) {
     const calCmd = Object.entries(results)
       .map(([idx, cal]) => `${parseInt(idx) + 1},${cal.min},${cal.mid},${cal.max}`)
       .join(';')
     ws.value.sendData(`C:${calCmd}`)
+    ws.value.sendData('SAVE_NVS')
   }
 }
 
@@ -330,6 +327,20 @@ function onCalibrationResult(results) {
       }
       if (line.startsWith('MAP_OK')) {
         mapWriteState.value = 'ok'
+        return
+      }
+      if (line.startsWith('STICK_MODE:')) {
+        const mode = parseInt(line.slice('STICK_MODE:'.length).trim(), 10)
+        if (mode === 1 || mode === 2) {
+          stickMode.value = mode
+        }
+        return
+      }
+      if (line.startsWith('BTN:')) {
+        const vals = line.slice(4).trim().split(',').map(v => parseInt(v, 10))
+        if (vals.length === 4 && vals.every(v => !isNaN(v))) {
+          btnCfg.value = vals
+        }
         return
       }
       if (!parseModeLine(line)) {
@@ -396,8 +407,8 @@ function onCalibrationResult(results) {
     if (!isNaN(val)) revMask.value = val
   }
 
-  const SOURCE_NAMES = { 4: 'SW1', 5: 'SW2', 6: 'SW3', 7: 'SW4' }
-  const SOURCE_IDS   = { SW1: 4, SW2: 5, SW3: 6, SW4: 7 }
+  const SOURCE_NAMES = { 4: 'SA', 5: 'SB', 6: 'SC', 7: 'SD' }
+  const SOURCE_IDS   = { SA: 4, SB: 5, SC: 6, SD: 7 }
 
   function parseMap(line) {
     line.slice(4).split(';').forEach(segment => {
@@ -476,9 +487,23 @@ function onCalibrationResult(results) {
     ws.value.sendData(cmd)
   }
 
+  // --- Button Trigger Mode Methods ---
+  function setBtnCfg(idx, val) {
+    if (idx >= 0 && idx < 4) {
+      btnCfg.value = [...btnCfg.value.slice(0, idx), val, ...btnCfg.value.slice(idx + 1)]
+    }
+    ws.value?.sendData(`BTN:${btnCfg.value[0]},${btnCfg.value[1]},${btnCfg.value[2]},${btnCfg.value[3]}`)
+  }
+
+  function resetBtnCfg() {
+    btnCfg.value = [0, 0, 0, 0]
+    ws.value?.sendData('BTN:0,0,0,0')
+  }
+
   // --- Stick Mode ---
   function setStickMode(mode) {
     stickMode.value = mode
+    ws.value?.sendData(`STICK_MODE:${mode}`)
   }
 
   function setEpa(ch, pos, neg) {
@@ -509,6 +534,7 @@ function onCalibrationResult(results) {
     showCalibrationModal,
     configSubTab,
     stickMode,
+    btnCfg,
     channelMapping,
     availableSwitches,
     isCrsfLoading,
@@ -529,7 +555,6 @@ function onCalibrationResult(results) {
     // methods
     toggleTheme,
     changeLanguage,
-    saveCalibration,
     refreshCrsf,
     setLinkWireMode,
     handleCrsfBind,
@@ -543,6 +568,8 @@ function onCalibrationResult(results) {
     resetChannelMapping,
     writeChannelMapping,
     setStickMode,
+    setBtnCfg,
+    resetBtnCfg,
     setEpa,
     setRev,
   }

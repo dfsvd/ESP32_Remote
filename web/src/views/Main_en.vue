@@ -95,6 +95,28 @@
           </article>
         </div>
 
+        <!-- Key Mode Settings -->
+        <article class="p-5 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
+          <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ btnT.title }}</h3>
+          <div class="grid grid-cols-4 gap-3">
+            <div v-for="(btn, idx) in btnT.items" :key="idx" class="flex flex-col gap-1.5">
+              <span class="text-[0.65rem] text-darwin-muted font-bold">{{ btn.name }}</span>
+              <select
+                :value="btnCfg[idx]"
+                @change="setBtnCfg(idx, parseInt($event.target.value))"
+                class="px-3 py-2 text-sm rounded-lg bg-darwin-panel border border-[var(--theme-border)] text-darwin-ink outline-none cursor-pointer"
+              >
+                <option v-for="opt in btn.options" :key="opt.val" :value="opt.val">{{ opt.label }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="flex items-center gap-3 mt-3">
+            <button type="button" @click="resetBtnCfg"
+              class="px-4 py-1.5 text-xs font-bold rounded-full border border-[var(--theme-border)] text-darwin-muted"
+            >{{ btnT.reset }}</button>
+          </div>
+        </article>
+
         <!-- Joystick + Main Channels -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <!-- Joystick Section -->
@@ -143,10 +165,7 @@
             :channels="visibleChannels"
             :epa-data="epaData"
             :rev-mask="revMask"
-            :t="configT"
             t-raw-label="RAW"
-            @calibrate="showCalibrationModal = true"
-            @save="saveCalibration(t)"
             @update-epa="(ch, pos, neg) => setEpa(ch, pos, neg)"
             @toggle-rev="(ch) => setRev(ch, !((revMask >> (ch - 1)) & 1))"
           />
@@ -222,12 +241,14 @@ const {
   isCrsfLoading, crsfStatus, channels, crsfMenus,
   epaData, revMask,
   leftStick, rightStick, visibleChannels,
+  btnCfg,
   isDarkMode, toggleTheme,
-  changeLanguage, saveCalibration, setStickMode,
+  changeLanguage, setStickMode,
   mapWriteState, updateChannelMapping, resetChannelMapping, writeChannelMapping,
   refreshCrsf, handleCrsfBind, handleCrsfCommand, handleCrsfSelectChange,
   onCalibrationResult, onWsData, requestCalibration,
   setEpa, setRev,
+  setBtnCfg, resetBtnCfg,
 } = useRCState()
 
 currentLang.value = 'en'
@@ -244,14 +265,9 @@ const t = {
   leftStick: 'Left Stick',
   rightStick: 'Right Stick',
   channelValues: 'Channel Values',
-  notConnectedAlert: 'Not connected, cannot save.',
-  savedAlert: 'Mode and calibration data sent.',
 }
 
-const configT = {
-  autoCalibration: 'Auto Calibrate',
-  saveCalibration: 'Save Calibration',
-}
+const configT = {}
 
 const mappingT = {
   write: 'Write',
@@ -280,6 +296,43 @@ const stickT = {
   leftStick: 'Left Stick',
   rightStick: 'Right Stick',
   calibrate: 'Calibrate Sticks',
+}
+
+const btnT = {
+  title: 'Key Mode',
+  reset: 'Reset',
+  items: [
+    {
+      name: 'SA',
+      options: [
+        { val: 0, label: 'Touch' },
+        { val: 1, label: 'Single' },
+        { val: 2, label: 'Double' },
+      ],
+    },
+    {
+      name: 'SB',
+      options: [
+        { val: 0, label: '3-state' },
+        { val: 1, label: '2-state' },
+      ],
+    },
+    {
+      name: 'SC',
+      options: [
+        { val: 0, label: '3-state' },
+        { val: 1, label: '2-state' },
+      ],
+    },
+    {
+      name: 'SD',
+      options: [
+        { val: 0, label: 'Touch' },
+        { val: 1, label: 'Single' },
+        { val: 2, label: 'Double' },
+      ],
+    },
+  ],
 }
 
 const calT = {

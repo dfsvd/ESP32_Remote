@@ -72,11 +72,11 @@ typedef struct {
 // #define ADC_aux4        ADC_CHANNEL_3
 
 // 开关引脚 — 以遥控器物理标识命名
-#define RC_SWITCH_SA_PIN        GPIO_NUM_38  // SA: 按键(自复位) → CH8
+#define RC_SWITCH_SA_PIN        GPIO_NUM_36  // SA: 按键(自复位) → CH5
 #define RC_SWITCH_SB_PIN        GPIO_NUM_37  // SB: 2段拨码      → CH6
 #define RC_SWITCH_SC_UP_PIN     GPIO_NUM_39  // SC: 3段拨码 UP   → CH7
 #define RC_SWITCH_SC_DOWN_PIN   GPIO_NUM_40  // SC: 3段拨码 DOWN → CH7
-#define RC_SWITCH_SD_PIN        GPIO_NUM_36  // SD: 按键(自复位) → CH5
+#define RC_SWITCH_SD_PIN        GPIO_NUM_38  // SD: 按键(自复位) → CH8
 
 #define GPIO_SW         ((1ULL << RC_SWITCH_SA_PIN) | (1ULL << RC_SWITCH_SC_UP_PIN) | (1ULL << RC_SWITCH_SC_DOWN_PIN)| (1ULL << RC_SWITCH_SD_PIN)| (1ULL << RC_SWITCH_SB_PIN))
 
@@ -98,13 +98,12 @@ extern uint8_t epa_neg[16];
 // REV 反向：位掩码 bit0=CH1 ... bit15=CH16 (0=NOR, 1=REV)
 extern uint16_t rev_mask;
 
-// --- 预留字段 (后期实装) ---
 // 通道映射: ch_map[dst_ch] = src_physical, 0xFF 表示禁用
 extern uint8_t ch_map[16];
 // 摇杆模式: 1=日本手 2=美国手 3=Mode3 4=Mode4
 extern uint8_t stick_mode;
 // 按键触发模式: [0]=SA [1]=SB [2]=SC [3]=SD
-//   SA/SD: 0=单击 1=双击
+//   SA/SD: 0=触摸 1=单击 2=双击
 //   SB/SC: 0=三态 1=二态
 extern uint8_t btn_cfg[4];
 
