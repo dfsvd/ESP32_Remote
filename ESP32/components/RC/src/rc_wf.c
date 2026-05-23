@@ -23,6 +23,10 @@ static httpd_handle_t server = NULL;
 static bool s_saved_crsf_half_duplex = false;
 static bool s_has_saved_crsf_link_mode = false;
 
+// 配置集 (profile) 常量
+#define MAX_PROFILES 8
+#define PROFILE_NAME_LEN 16
+
 // =================================================================================
 // 快速 DNS 响应 — 连通性检测域名→ESP32(204通过)，其他域名→NXDOMAIN(防止请求淹没)
 // =================================================================================
@@ -493,6 +497,71 @@ static esp_err_t ws_send_crsf_snapshot(httpd_req_t *req)
     return ws_send_text(req, menu_buf);
 }
 
+// 向前端推送全部配置 (复用 GET_CAL 和 PROFILE_LOAD)
+static void send_full_config(httpd_req_t *req)
+{
+    // M:
+    char mode_buf[16];
+    snprintf(mode_buf, sizeof(mode_buf), "M:%d\n", (int)current_sim_mode);
+    ws_send_text(req, mode_buf);
+
+    // C: (校准)
+    char cal_buf[512] = "C:";
+    int cal_off = 2;
+    for (int i = 0; i < 16; i++) {
+        int w = snprintf(cal_buf + cal_off, sizeof(cal_buf) - cal_off,
+                         "%d,%d,%d,%d%s", i + 1,
+                         limit[i].raw_min, limit[i].raw_mid, limit[i].raw_max,
+                         (i == 15) ? "\n" : ";");
+        if (w < 0 || w >= (int)(sizeof(cal_buf) - cal_off)) break;
+        cal_off += w;
+    }
+    ws_send_text(req, cal_buf);
+
+    // EPA:
+    char epa_buf[384] = "EPA:";
+    int epa_off = 4;
+    for (int i = 0; i < 16; i++) {
+        int w = snprintf(epa_buf + epa_off, sizeof(epa_buf) - epa_off,
+                         "%d,%d,%d%s", i + 1, epa_pos[i], epa_neg[i],
+                         (i == 15) ? "\n" : ";");
+        if (w < 0 || w >= (int)(sizeof(epa_buf) - epa_off)) break;
+        epa_off += w;
+    }
+    ws_send_text(req, epa_buf);
+
+    // REV:
+    char rev_buf[32];
+    snprintf(rev_buf, sizeof(rev_buf), "REV:%u\n", rev_mask);
+    ws_send_text(req, rev_buf);
+
+    // MAP:
+    char map_buf[256] = "MAP:";
+    int map_off = 4;
+    for (int i = 0; i < 16; i++) {
+        int w = snprintf(map_buf + map_off, sizeof(map_buf) - map_off,
+                         "%d,%d%s", i + 1, ch_map[i],
+                         (i == 15) ? "\n" : ";");
+        if (w < 0 || w >= (int)(sizeof(map_buf) - map_off)) break;
+        map_off += w;
+    }
+    ws_send_text(req, map_buf);
+
+    // STICK_MODE:
+    char stick_buf[32];
+    snprintf(stick_buf, sizeof(stick_buf), "STICK_MODE:%u\n", stick_mode);
+    ws_send_text(req, stick_buf);
+
+    // BTN:
+    char btn_buf[32];
+    snprintf(btn_buf, sizeof(btn_buf), "BTN:%u,%u,%u,%u\n",
+             btn_cfg[0], btn_cfg[1], btn_cfg[2], btn_cfg[3]);
+    ws_send_text(req, btn_buf);
+
+    // CRSF snapshot
+    ws_send_crsf_snapshot(req);
+}
+
 bool get_saved_crsf_link_mode(bool *half_duplex)
 {
     if (half_duplex) {
@@ -611,6 +680,193 @@ void load_settings_from_nvs() {
 }
 
 // =================================================================================
+// 配置集 (Profile) NVS 读写
+// =================================================================================
+
+typedef struct {
+    uint8_t count;
+    char names[MAX_PROFILES][PROFILE_NAME_LEN];
+} profile_index_t;
+
+static void read_profile_idx(nvs_handle_t handle, profile_index_t *idx) {
+    memset(idx, 0, sizeof(profile_index_t));
+    size_t sz = sizeof(profile_index_t);
+    nvs_get_blob(handle, "prof_idx", idx, &sz);
+}
+
+static void write_profile_idx(nvs_handle_t handle, const profile_index_t *idx) {
+    nvs_set_blob(handle, "prof_idx", idx, sizeof(profile_index_t));
+    nvs_commit(handle);
+}
+
+static int find_profile(const profile_index_t *idx, const char *name) {
+    for (int i = 0; i < idx->count; i++) {
+        if (strncmp(idx->names[i], name, PROFILE_NAME_LEN - 1) == 0)
+            return i;
+    }
+    return -1;
+}
+
+static void profile_save(const char *name) {
+    if (!name || name[0] == '\0') return;
+
+    nvs_handle_t h;
+    if (nvs_open("storage", NVS_READWRITE, &h) != ESP_OK) return;
+
+    // 读取索引
+    profile_index_t idx;
+    read_profile_idx(h, &idx);
+
+    // 查找或分配槽位
+    int slot = find_profile(&idx, name);
+    if (slot < 0) {
+        if (idx.count >= MAX_PROFILES) { nvs_close(h); return; }
+        slot = idx.count;
+        strncpy(idx.names[slot], name, PROFILE_NAME_LEN - 1);
+        idx.names[slot][PROFILE_NAME_LEN - 1] = '\0';
+        idx.count++;
+    }
+
+    // 构建配置 blob
+    config_blob_t blob;
+    portENTER_CRITICAL(&cfg_lock);
+    memcpy(blob.ch_map, ch_map, sizeof(ch_map));
+    memcpy(blob.epa_pos, epa_pos, sizeof(epa_pos));
+    memcpy(blob.epa_neg, epa_neg, sizeof(epa_neg));
+    blob.rev_mask = rev_mask;
+    blob.stick_mode = stick_mode;
+    memcpy(blob.btn_cfg, btn_cfg, sizeof(btn_cfg));
+    memcpy(blob.limit, limit, sizeof(limit));
+    portEXIT_CRITICAL(&cfg_lock);
+
+    // 写入 NVS
+    char key[16];
+    snprintf(key, sizeof(key), "prof_%d", slot);
+    esp_err_t err = nvs_set_blob(h, key, &blob, sizeof(blob));
+    if (err == ESP_OK) {
+        write_profile_idx(h, &idx);
+        ESP_LOGI(TAG, "配置集已保存: '%s' (slot %d)", name, slot);
+    } else {
+        ESP_LOGE(TAG, "配置集保存失败 '%s': %s", name, esp_err_to_name(err));
+    }
+
+    nvs_close(h);
+}
+
+static bool profile_load(httpd_req_t *req, const char *name) {
+    if (!name || name[0] == '\0') return false;
+
+    nvs_handle_t h;
+    if (nvs_open("storage", NVS_READONLY, &h) != ESP_OK) return false;
+
+    profile_index_t idx;
+    read_profile_idx(h, &idx);
+    int slot = find_profile(&idx, name);
+    if (slot < 0) { nvs_close(h); return false; }
+
+    char key[16];
+    snprintf(key, sizeof(key), "prof_%d", slot);
+    config_blob_t blob;
+    size_t sz = sizeof(blob);
+    esp_err_t err = nvs_get_blob(h, key, &blob, &sz);
+    nvs_close(h);
+
+    if (err != ESP_OK || sz != sizeof(blob)) return false;
+
+    // 写入运行时 (spinlock 保护)
+    portENTER_CRITICAL(&cfg_lock);
+    memcpy(ch_map, blob.ch_map, sizeof(ch_map));
+    memcpy(epa_pos, blob.epa_pos, sizeof(epa_pos));
+    memcpy(epa_neg, blob.epa_neg, sizeof(epa_neg));
+    rev_mask = blob.rev_mask;
+    stick_mode = blob.stick_mode;
+    memcpy(btn_cfg, blob.btn_cfg, sizeof(btn_cfg));
+    memcpy(limit, blob.limit, sizeof(limit));
+    portEXIT_CRITICAL(&cfg_lock);
+
+    // 同步到 NVS 当前 key (防止 do_nvs_save 覆盖)
+    request_nvs_save();
+
+    // 推送到 WebSocket
+    if (req) send_full_config(req);
+
+    ESP_LOGI(TAG, "配置集已加载: '%s' (slot %d)", name, slot);
+    return true;
+}
+
+static void profile_delete(const char *name) {
+    if (!name || name[0] == '\0') return;
+
+    nvs_handle_t h;
+    if (nvs_open("storage", NVS_READWRITE, &h) != ESP_OK) return;
+
+    profile_index_t idx;
+    read_profile_idx(h, &idx);
+    int slot = find_profile(&idx, name);
+    if (slot < 0) { nvs_close(h); return; }
+
+    // 删除 NVS key
+    char key[16];
+    snprintf(key, sizeof(key), "prof_%d", slot);
+    nvs_erase_key(h, key);
+
+    // 如果被删的不是最后一个槽位，把最后一个挪过来
+    int last = idx.count - 1;
+    if (slot < last) {
+        char last_key[16];
+        snprintf(last_key, sizeof(last_key), "prof_%d", last);
+
+        config_blob_t blob;
+        size_t sz = sizeof(blob);
+        if (nvs_get_blob(h, last_key, &blob, &sz) == ESP_OK) {
+            nvs_set_blob(h, key, &blob, sizeof(blob));
+        }
+        nvs_erase_key(h, last_key);
+
+        // 复制名字
+        strncpy(idx.names[slot], idx.names[last], PROFILE_NAME_LEN - 1);
+        idx.names[slot][PROFILE_NAME_LEN - 1] = '\0';
+    }
+
+    memset(idx.names[last], 0, PROFILE_NAME_LEN);
+    idx.count--;
+
+    write_profile_idx(h, &idx);
+    nvs_close(h);
+
+    ESP_LOGI(TAG, "配置集已删除: '%s'", name);
+}
+
+static void profile_list(httpd_req_t *req) {
+    if (!req) return;
+
+    nvs_handle_t h;
+    if (nvs_open("storage", NVS_READONLY, &h) != ESP_OK) {
+        ws_send_text(req, "PROFILE_LIST:\n");
+        return;
+    }
+
+    profile_index_t idx;
+    read_profile_idx(h, &idx);
+    nvs_close(h);
+
+    // 构建 PROFILE_LIST:name1;name2;name3\n
+    char buf[256] = "PROFILE_LIST:";
+    size_t off = strlen(buf);
+    for (int i = 0; i < idx.count && off < sizeof(buf) - 2; i++) {
+        if (i > 0 && off < sizeof(buf) - 1) buf[off++] = ';';
+        size_t name_len = strnlen(idx.names[i], PROFILE_NAME_LEN);
+        size_t copy = (off + name_len < sizeof(buf) - 1) ? name_len : (sizeof(buf) - 1 - off);
+        memcpy(buf + off, idx.names[i], copy);
+        off += copy;
+    }
+    buf[off++] = '\n';
+    buf[off] = '\0';
+
+    ws_send_text(req, buf);
+}
+
+// =================================================================================
 // 处理前端网页请求 (/)
 // =================================================================================
 static esp_err_t index_html_handler(httpd_req_t *req)
@@ -658,101 +914,9 @@ static esp_err_t ws_handler(httpd_req_t *req)
 
             // 1. 前端请求当前配置
             if (strncmp(text, "GET_CAL", 7) == 0) {
-                ESP_LOGI(TAG, "收到前端 GET_CAL 请求，正在下发模式和配置...");
-
-                // 先发模式
-                char mode_buf[16];
-                snprintf(mode_buf, sizeof(mode_buf), "M:%d\n", (int)current_sim_mode);
-
-                httpd_ws_frame_t mode_pkt;
-                memset(&mode_pkt, 0, sizeof(mode_pkt));
-                mode_pkt.payload = (uint8_t*)mode_buf;
-                mode_pkt.len = strlen(mode_buf);
-                mode_pkt.type = HTTPD_WS_TYPE_TEXT;
-
-                httpd_ws_send_frame(req, &mode_pkt);
-
-                
-               
-
-                // 再发校准
-                char cal_buf[512] = "C:";
-                int offset = 2;
-
-                for (int i = 0; i < 16; i++) {
-                    int written = snprintf(
-                        cal_buf + offset,
-                        sizeof(cal_buf) - offset,
-                        "%d,%d,%d,%d%s",
-                        i + 1,
-                        limit[i].raw_min,
-                        limit[i].raw_mid,
-                        limit[i].raw_max,
-                        (i == 15) ? "\n" : ";"
-                    );
-
-                    if (written < 0 || written >= (int)(sizeof(cal_buf) - offset)) {
-                        ESP_LOGE(TAG, "cal_buf 空间不足");
-                        break;
-                    }
-                    offset += written;
-                }
-
-                httpd_ws_frame_t cal_pkt;
-                memset(&cal_pkt, 0, sizeof(cal_pkt));
-                cal_pkt.payload = (uint8_t*)cal_buf;
-                cal_pkt.len = strlen(cal_buf);
-                cal_pkt.type = HTTPD_WS_TYPE_TEXT;
-
-                httpd_ws_send_frame(req, &cal_pkt);
-
-                // 下发 EPA 数据 (EPA:ch,pos,neg;...)
-                char epa_buf[384] = "EPA:";
-                int epa_off = 4;
-                for (int i = 0; i < 16; i++) {
-                    int w = snprintf(epa_buf + epa_off, sizeof(epa_buf) - epa_off,
-                                     "%d,%d,%d%s", i + 1, epa_pos[i], epa_neg[i],
-                                     (i == 15) ? "\n" : ";");
-                    if (w < 0 || w >= (int)(sizeof(epa_buf) - epa_off)) break;
-                    epa_off += w;
-                }
-                httpd_ws_frame_t epa_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)epa_buf, .len = strlen(epa_buf) };
-                httpd_ws_send_frame(req, &epa_pkt);
-
-                // 下发 REV 数据
-                char rev_buf[32];
-                snprintf(rev_buf, sizeof(rev_buf), "REV:%u\n", rev_mask);
-                httpd_ws_frame_t rev_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)rev_buf, .len = strlen(rev_buf) };
-                httpd_ws_send_frame(req, &rev_pkt);
-
-                // 下发 MAP 数据
-                char map_buf[256] = "MAP:";
-                int map_off = 4;
-                for (int i = 0; i < 16; i++) {
-                    int w = snprintf(map_buf + map_off, sizeof(map_buf) - map_off,
-                                     "%d,%d%s", i + 1, ch_map[i],
-                                     (i == 15) ? "\n" : ";");
-                    if (w < 0 || w >= (int)(sizeof(map_buf) - map_off)) break;
-                    map_off += w;
-                }
-                httpd_ws_frame_t map_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)map_buf, .len = strlen(map_buf) };
-                httpd_ws_send_frame(req, &map_pkt);
-
-                // 下发 STICK_MODE
-                char stick_buf[32];
-                snprintf(stick_buf, sizeof(stick_buf), "STICK_MODE:%u\n", stick_mode);
-                httpd_ws_frame_t stick_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)stick_buf, .len = strlen(stick_buf) };
-                httpd_ws_send_frame(req, &stick_pkt);
-
-                // 下发 BTN (按键触发模式)
-                char btn_buf[32];
-                snprintf(btn_buf, sizeof(btn_buf), "BTN:%u,%u,%u,%u\n",
-                         btn_cfg[0], btn_cfg[1], btn_cfg[2], btn_cfg[3]);
-                httpd_ws_frame_t btn_pkt = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)btn_buf, .len = strlen(btn_buf) };
-                httpd_ws_send_frame(req, &btn_pkt);
-
-                ws_send_crsf_snapshot(req);
-                ESP_LOGI(TAG, "模式和配置下发完毕！");
+                ESP_LOGI(TAG, "收到前端 GET_CAL 请求，正在下发配置...");
+                send_full_config(req);
+                ESP_LOGI(TAG, "配置下发完毕！");
             }
 
             // 2. 前端保存模式
@@ -981,6 +1145,37 @@ static esp_err_t ws_handler(httpd_req_t *req)
                     ESP_LOGI(TAG, "BTN 已更新: SA=%d SB=%d SC=%d SD=%d", sa, sb, sc, sd);
                 } else {
                     ESP_LOGW(TAG, "非法 BTN 指令: %s", text);
+                }
+            }
+
+            // ---- 配置集 (Profile) 命令 ----
+            else if (strcmp(text, "PROFILE_LIST") == 0) {
+                profile_list(req);
+            }
+            else if (strncmp(text, "PROFILE_SAVE:", 13) == 0) {
+                const char *name = text + 13;
+                if (name[0] != '\0') {
+                    profile_save(name);
+                    ws_send_text(req, "PROFILE_OK\n");
+                } else {
+                    ws_send_text(req, "PROFILE_ERR:empty_name\n");
+                }
+            }
+            else if (strncmp(text, "PROFILE_LOAD:", 13) == 0) {
+                const char *name = text + 13;
+                if (profile_load(req, name)) {
+                    ws_send_text(req, "PROFILE_OK\n");
+                } else {
+                    ws_send_text(req, "PROFILE_ERR:not_found\n");
+                }
+            }
+            else if (strncmp(text, "PROFILE_DEL:", 12) == 0) {
+                const char *name = text + 12;
+                if (name[0] != '\0') {
+                    profile_delete(name);
+                    ws_send_text(req, "PROFILE_OK\n");
+                } else {
+                    ws_send_text(req, "PROFILE_ERR:empty_name\n");
                 }
             }
         }

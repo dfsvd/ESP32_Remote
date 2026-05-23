@@ -20,6 +20,19 @@ typedef struct {
     uint16_t raw_max;
 } channel_cal_t;
 
+#define MAX_PROFILES 8
+#define PROFILE_NAME_LEN 16
+
+typedef struct {
+    uint8_t ch_map[16];
+    uint8_t epa_pos[16];
+    uint8_t epa_neg[16];
+    uint16_t rev_mask;
+    uint8_t stick_mode;
+    uint8_t btn_cfg[4];
+    channel_cal_t limit[16];
+} __attribute__((packed)) config_blob_t;
+
 typedef struct {
     // ==========================================================
     // 1. 最终输出数据 (发给 USB / 模拟器用的 16 个通道，全是 1000~2000)

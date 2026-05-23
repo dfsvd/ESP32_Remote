@@ -117,6 +117,18 @@
           </div>
         </article>
 
+        <!-- 配置快照 -->
+        <article class="p-5 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
+          <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ profileT.title }}</h3>
+          <ConfigProfiles
+            :profiles="profiles"
+            :t="profileT"
+            @save="saveProfile"
+            @load="loadProfile"
+            @delete="deleteProfile"
+          />
+        </article>
+
         <!-- Joystick + Main Channels -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <!-- Joystick Section -->
@@ -213,7 +225,7 @@
       ref="ws"
       @data="onWsData"
       @status="isConnected = $event"
-      @connected="requestCalibration"
+      @connected="requestCalibration(); loadProfileList()"
     />
 
     <!-- Calibration Modal -->
@@ -237,6 +249,7 @@ import CrsfConfiguratorPanel from '../components/CrsfConfiguratorPanel.vue'
 import ConfigChannelProps from '../components/ConfigChannelProps.vue'
 import ConfigChannelMapping from '../components/ConfigChannelMapping.vue'
 import ConfigStickMode from '../components/ConfigStickMode.vue'
+import ConfigProfiles from '../components/ConfigProfiles.vue'
 import ChannelBar from '../components/ChannelBar.vue'
 
 const {
@@ -253,6 +266,7 @@ const {
   onCalibrationResult, onWsData, requestCalibration,
   setEpa, setRev,
   setBtnCfg, resetBtnCfg,
+  profiles, loadProfileList, saveProfile, loadProfile, deleteProfile,
 } = useRCState()
 
 currentLang.value = 'zh'
@@ -272,6 +286,20 @@ const t = {
 }
 
 const configT = {}
+
+const profileT = {
+  title: '配置快照',
+  namePlaceholder: '方案名称...',
+  save: '保存当前配置',
+  load: '加载',
+  delete: '删除',
+  empty: '暂无已保存的方案',
+  confirmPrompt: '加载此方案？',
+  confirmLoad: '加载',
+  confirmDel: '删除此方案？',
+  confirmDelete: '删除',
+  cancel: '取消',
+}
 
 const mappingT = {
   write: '写入',

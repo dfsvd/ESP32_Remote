@@ -343,6 +343,15 @@ function onCalibrationResult(results) {
         }
         return
       }
+      if (line.startsWith('PROFILE_LIST:')) {
+        const names = line.slice(13).trim().split(';').filter(Boolean)
+        profiles.value = names.map(name => ({ name }))
+        return
+      }
+      if (line.startsWith('PROFILE_OK') || line.startsWith('PROFILE_ERR:')) {
+        loadProfileList()
+        return
+      }
       if (!parseModeLine(line)) {
         parseChannelsLine(line)
       }
@@ -466,6 +475,28 @@ function onCalibrationResult(results) {
   // --- Channel Mapping Methods ---
   const mapWriteState = ref('idle') // 'idle' | 'sending' | 'ok'
 
+// --- Profile State ---
+const profiles = ref([])
+
+function loadProfileList() {
+  ws.value?.sendData('PROFILE_LIST')
+}
+
+function saveProfile(name) {
+  if (!name || !name.trim()) return
+  ws.value?.sendData(`PROFILE_SAVE:${name.trim()}`)
+}
+
+function loadProfile(name) {
+  if (!name) return
+  ws.value?.sendData(`PROFILE_LOAD:${name}`)
+}
+
+function deleteProfile(name) {
+  if (!name) return
+  ws.value?.sendData(`PROFILE_DEL:${name}`)
+}
+
   function updateChannelMapping(idx, newSwitch) {
     if (idx >= 0 && idx < channelMapping.value.length) {
       channelMapping.value[idx].current = newSwitch
@@ -546,6 +577,9 @@ function onCalibrationResult(results) {
     epaData,
     revMask,
 
+    // profile state
+    profiles,
+
     // computed
     leftStick,
     rightStick,
@@ -572,5 +606,11 @@ function onCalibrationResult(results) {
     resetBtnCfg,
     setEpa,
     setRev,
+
+    // profile methods
+    loadProfileList,
+    saveProfile,
+    loadProfile,
+    deleteProfile,
   }
 }
