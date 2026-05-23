@@ -66,6 +66,9 @@ const channelMapping = ref([
 
 const availableSwitches = ['SA', 'SB', 'SC', 'SD', 'None']
 
+// 完整 16 通道映射原始数据 (从 MAP: 行解析)
+const fullChMap = ref(Array.from({ length: 16 }, (_, i) => i))
+
 // --- CRSF ---
 const isCrsfLoading = ref(false)
 const linkWireMode = ref('dual')
@@ -349,7 +352,12 @@ function onCalibrationResult(results) {
         return
       }
       if (line.startsWith('PROFILE_OK') || line.startsWith('PROFILE_ERR:')) {
+        if (_pendingExportName && line.startsWith('PROFILE_OK')) {
+          _doExport(_pendingExportName)
+          _pendingExportName = null
+        }
         loadProfileList()
+        requestCalibration()
         return
       }
       if (!parseModeLine(line)) {
@@ -426,6 +434,7 @@ function onCalibrationResult(results) {
       const ch = parseInt(parts[0], 10)
       const src = parseInt(parts[1], 10)
       if (isNaN(ch) || isNaN(src)) return
+      if (ch >= 1 && ch <= 16) fullChMap.value[ch - 1] = src
       const m = channelMapping.value.find(m => m.channel === ch)
       if (m) {
         m.current = SOURCE_NAMES[src] || (src < 16 ? String(src) : 'None')
@@ -477,6 +486,9 @@ function onCalibrationResult(results) {
 
 // --- Profile State ---
 const profiles = ref([])
+const importSuccess = ref(false)
+const importError = ref('')
+let _pendingExportName = null
 
 function loadProfileList() {
   ws.value?.sendData('PROFILE_LIST')
@@ -495,6 +507,107 @@ function loadProfile(name) {
 function deleteProfile(name) {
   if (!name) return
   ws.value?.sendData(`PROFILE_DEL:${name}`)
+}
+
+function renameProfile(oldName, newName) {
+  if (!oldName || !newName || oldName === newName) return
+  ws.value?.sendData(`PROFILE_RENAME:${oldName}|${newName}`)
+}
+
+function exportConfig() {
+  const cal = channels.value.map(c => ({
+    min: c.cal.min, mid: c.cal.mid, max: c.cal.max
+  }))
+  const epa = epaData.value.map(e => ({ ch: e.ch, pos: e.pos, neg: e.neg }))
+  const mapping = channelMapping.value.map(m => ({
+    channel: m.channel, current: m.current
+  }))
+  const cfg = {
+    version: 1,
+    stickMode: stickMode.value,
+    revMask: revMask.value,
+    btnCfg: [...btnCfg.value],
+    chMap: [...fullChMap.value],
+    epa, mapping, cal,
+  }
+  return JSON.stringify(cfg, null, 2)
+}
+
+function _doExport(name) {
+  const cal = channels.value.map(c => ({
+    min: c.cal.min, mid: c.cal.mid, max: c.cal.max
+  }))
+  const epa = epaData.value.map(e => ({ ch: e.ch, pos: e.pos, neg: e.neg }))
+  const mapping = channelMapping.value.map(m => ({
+    channel: m.channel, current: m.current
+  }))
+  const cfg = {
+    version: 1,
+    name: name,
+    stickMode: stickMode.value,
+    revMask: revMask.value,
+    btnCfg: [...btnCfg.value],
+    chMap: [...fullChMap.value],
+    epa, mapping, cal,
+  }
+  const json = JSON.stringify(cfg, null, 2)
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `rc_${name}_${Date.now()}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportProfile(name) {
+  _pendingExportName = name
+  ws.value?.sendData(`PROFILE_LOAD:${name}`)
+}
+
+function importConfig(jsonStr) {
+  let cfg
+  try { cfg = JSON.parse(jsonStr) } catch { importError.value = '无效的 JSON 文件'; return }
+  if (!ws.value) return
+
+  // 发送所有配置命令
+  ws.value.sendData(`STICK_MODE:${cfg.stickMode ?? 2}`)
+
+  if (cfg.btnCfg) {
+    ws.value.sendData(`BTN:${cfg.btnCfg[0]},${cfg.btnCfg[1]},${cfg.btnCfg[2]},${cfg.btnCfg[3]}`)
+  }
+
+  if (cfg.epa) {
+    cfg.epa.forEach(e => ws.value.sendData(`EPA:${e.ch},${e.pos},${e.neg}`))
+  }
+
+  if (cfg.revMask !== undefined) {
+    for (let ch = 1; ch <= 16; ch++) {
+      const on = (cfg.revMask >> (ch - 1)) & 1
+      if (on) ws.value.sendData(`REV:${ch},1`)
+    }
+  }
+
+  if (cfg.mapping) {
+    const cmd = 'MAP:' + cfg.mapping.map(m => `${m.channel},${m.current}`).join(';')
+    ws.value.sendData(cmd)
+  }
+
+  if (cfg.cal) {
+    const calCmd = cfg.cal.map((c, i) => `${i + 1},${c.min},${c.mid},${c.max}`).join(';')
+    ws.value.sendData(`C:${calCmd}`)
+  }
+
+  ws.value.sendData('SAVE_NVS')
+
+  // 如果有方案名，直接保存为命名方案
+  if (cfg.name) {
+    ws.value.sendData(`PROFILE_SAVE:${cfg.name}`)
+  }
+
+  importSuccess.value = true
+  importError.value = ''
+  setTimeout(() => { importSuccess.value = false }, 2500)
 }
 
   function updateChannelMapping(idx, newSwitch) {
@@ -567,6 +680,7 @@ function deleteProfile(name) {
     stickMode,
     btnCfg,
     channelMapping,
+    fullChMap,
     availableSwitches,
     isCrsfLoading,
     linkWireMode,
@@ -579,6 +693,8 @@ function deleteProfile(name) {
 
     // profile state
     profiles,
+    importSuccess,
+    importError,
 
     // computed
     leftStick,
@@ -612,5 +728,9 @@ function deleteProfile(name) {
     saveProfile,
     loadProfile,
     deleteProfile,
+    renameProfile,
+    exportConfig,
+    exportProfile,
+    importConfig,
   }
 }

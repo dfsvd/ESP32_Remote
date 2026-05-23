@@ -117,18 +117,6 @@
           </div>
         </article>
 
-        <!-- 配置快照 -->
-        <article class="p-5 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
-          <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ profileT.title }}</h3>
-          <ConfigProfiles
-            :profiles="profiles"
-            :t="profileT"
-            @save="saveProfile"
-            @load="loadProfile"
-            @delete="deleteProfile"
-          />
-        </article>
-
         <!-- Joystick + Main Channels -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <!-- Joystick Section -->
@@ -153,6 +141,23 @@
             </div>
           </article>
         </div>
+
+        <!-- 配置快照 -->
+        <article class="p-5 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
+          <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ profileT.title }}</h3>
+          <ConfigProfiles
+            :profiles="profiles"
+            :t="profileT"
+            :import-success="importSuccess"
+            :import-error="importError"
+            @save="saveProfile"
+            @load="loadProfile"
+            @delete="deleteProfile"
+            @rename="renameProfile"
+            @export-profile="exportProfile"
+            @import="handleImport"
+          />
+        </article>
       </section>
 
       <!-- ===== Tab: Configuration ===== -->
@@ -267,6 +272,8 @@ const {
   setEpa, setRev,
   setBtnCfg, resetBtnCfg,
   profiles, loadProfileList, saveProfile, loadProfile, deleteProfile,
+  renameProfile, exportConfig, importConfig,
+  importSuccess, importError, exportProfile,
 } = useRCState()
 
 currentLang.value = 'zh'
@@ -290,15 +297,26 @@ const configT = {}
 const profileT = {
   title: '配置快照',
   namePlaceholder: '方案名称...',
-  save: '保存当前配置',
+  save: '保存',
+  export: '导出',
+  import_: '导入',
   load: '加载',
   delete: '删除',
+  rename: '重命名',
   empty: '暂无已保存的方案',
   confirmPrompt: '加载此方案？',
   confirmLoad: '加载',
   confirmDel: '删除此方案？',
   confirmDelete: '删除',
+  confirmRename: '确认',
+  confirmOverwrite: '方案已存在，覆盖？',
+  confirmOverwriteBtn: '覆盖',
+  importSuccess: '导入成功',
   cancel: '取消',
+}
+
+function handleImport(jsonStr) {
+  importConfig(jsonStr)
 }
 
 const mappingT = {

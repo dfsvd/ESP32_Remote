@@ -505,9 +505,9 @@ static void send_full_config(httpd_req_t *req)
     snprintf(mode_buf, sizeof(mode_buf), "M:%d\n", (int)current_sim_mode);
     ws_send_text(req, mode_buf);
 
-    // C: (校准)
-    char cal_buf[512] = "C:";
-    int cal_off = 2;
+    // C: (校准) — 缓冲较大，静态分配
+    static char cal_buf[512];
+    int cal_off = snprintf(cal_buf, sizeof(cal_buf), "C:");
     for (int i = 0; i < 16; i++) {
         int w = snprintf(cal_buf + cal_off, sizeof(cal_buf) - cal_off,
                          "%d,%d,%d,%d%s", i + 1,
@@ -519,8 +519,8 @@ static void send_full_config(httpd_req_t *req)
     ws_send_text(req, cal_buf);
 
     // EPA:
-    char epa_buf[384] = "EPA:";
-    int epa_off = 4;
+    static char epa_buf[384];
+    int epa_off = snprintf(epa_buf, sizeof(epa_buf), "EPA:");
     for (int i = 0; i < 16; i++) {
         int w = snprintf(epa_buf + epa_off, sizeof(epa_buf) - epa_off,
                          "%d,%d,%d%s", i + 1, epa_pos[i], epa_neg[i],
@@ -536,8 +536,8 @@ static void send_full_config(httpd_req_t *req)
     ws_send_text(req, rev_buf);
 
     // MAP:
-    char map_buf[256] = "MAP:";
-    int map_off = 4;
+    static char map_buf[256];
+    int map_off = snprintf(map_buf, sizeof(map_buf), "MAP:");
     for (int i = 0; i < 16; i++) {
         int w = snprintf(map_buf + map_off, sizeof(map_buf) - map_off,
                          "%d,%d%s", i + 1, ch_map[i],
@@ -1176,6 +1176,21 @@ static esp_err_t ws_handler(httpd_req_t *req)
                     ws_send_text(req, "PROFILE_OK\n");
                 } else {
                     ws_send_text(req, "PROFILE_ERR:empty_name\n");
+                }
+            }
+            else if (strncmp(text, "PROFILE_RENAME:", 15) == 0) {
+                // 格式: PROFILE_RENAME:oldName|newName
+                const char *payload = text + 15;
+                char old_name[PROFILE_NAME_LEN] = {0};
+                char new_name[PROFILE_NAME_LEN] = {0};
+                if (sscanf(payload, "%15[^|]|%15[^\n]", old_name, new_name) == 2 &&
+                    old_name[0] != '\0' && new_name[0] != '\0') {
+                    // 保存新名 + 删除旧名
+                    profile_save(new_name);
+                    profile_delete(old_name);
+                    ws_send_text(req, "PROFILE_OK\n");
+                } else {
+                    ws_send_text(req, "PROFILE_ERR:invalid_name\n");
                 }
             }
         }

@@ -117,18 +117,6 @@
           </div>
         </article>
 
-        <!-- Config Snapshots -->
-        <article class="p-5 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
-          <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ profileT.title }}</h3>
-          <ConfigProfiles
-            :profiles="profiles"
-            :t="profileT"
-            @save="saveProfile"
-            @load="loadProfile"
-            @delete="deleteProfile"
-          />
-        </article>
-
         <!-- Joystick + Main Channels -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <!-- Joystick Section -->
@@ -153,6 +141,23 @@
             </div>
           </article>
         </div>
+
+        <!-- Config Snapshots -->
+        <article class="p-5 rounded-2xl border border-[var(--theme-border)] bg-darwin-panel">
+          <h3 class="m-0 mb-4 text-darwin-amber text-[0.7rem] font-bold uppercase tracking-widest">{{ profileT.title }}</h3>
+          <ConfigProfiles
+            :profiles="profiles"
+            :t="profileT"
+            :import-success="importSuccess"
+            :import-error="importError"
+            @save="saveProfile"
+            @load="loadProfile"
+            @delete="deleteProfile"
+            @rename="renameProfile"
+            @export-profile="exportProfile"
+            @import="handleImport"
+          />
+        </article>
       </section>
 
       <!-- ===== Tab: Configuration ===== -->
@@ -263,6 +268,8 @@ const {
   setEpa, setRev,
   setBtnCfg, resetBtnCfg,
   profiles, loadProfileList, saveProfile, loadProfile, deleteProfile,
+  renameProfile, exportConfig, importConfig,
+  importSuccess, importError, exportProfile,
 } = useRCState()
 
 currentLang.value = 'en'
@@ -286,15 +293,26 @@ const configT = {}
 const profileT = {
   title: 'Config Snapshots',
   namePlaceholder: 'Profile name...',
-  save: 'Save Current',
+  save: 'Save',
+  export: 'Export',
+  import_: 'Import',
   load: 'Load',
   delete: 'Delete',
+  rename: 'Rename',
   empty: 'No saved profiles',
   confirmPrompt: 'Load this profile?',
   confirmLoad: 'Load',
   confirmDel: 'Delete this profile?',
   confirmDelete: 'Delete',
+  confirmRename: 'Save',
+  confirmOverwrite: 'Profile exists, overwrite?',
+  confirmOverwriteBtn: 'Overwrite',
+  importSuccess: 'Import successful',
   cancel: 'Cancel',
+}
+
+function handleImport(jsonStr) {
+  importConfig(jsonStr)
 }
 
 const mappingT = {
