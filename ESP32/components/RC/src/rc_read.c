@@ -1,4 +1,94 @@
 #include "rc_read.h"
+#include <stdlib.h>
+
+/* =========================================================================
+ * ADC 调试模块 — 需同时定义 ADC_DEBUG 和 ADC_DEBUG_INTERVAL_MS 才编译
+ * 用法: CMakeLists.txt 添加 add_compile_definitions(ADC_DEBUG ADC_DEBUG_INTERVAL_MS=1000)
+ * ADC_DEBUG_INTERVAL_MS: 打印间隔 (ms), 范围 [10, 10000]
+ * ========================================================================= */
+#if defined(ADC_DEBUG) && defined(ADC_DEBUG_INTERVAL_MS)
+#if ADC_DEBUG_INTERVAL_MS < 10
+#undef ADC_DEBUG_INTERVAL_MS
+#define ADC_DEBUG_INTERVAL_MS 10
+#elif ADC_DEBUG_INTERVAL_MS > 10000
+#undef ADC_DEBUG_INTERVAL_MS
+#define ADC_DEBUG_INTERVAL_MS 10000
+#endif
+#define ADC_DEBUG_MAX_SAMPLES 300
+static bool     s_dbg_active      = false;
+static uint32_t s_dbg_last_print  = 0;
+static uint32_t s_dbg_last_sa_chk = 0;
+static bool     s_dbg_sa_prev     = false;
+static uint16_t s_dbg_buf[4][ADC_DEBUG_MAX_SAMPLES];
+static uint16_t s_dbg_cnt         = 0;
+static const char *s_dbg_names[4] = {"Roll", "Pitch", "Thr", "Yaw"};
+
+static int cmp_u16(const void *a, const void *b) {
+    uint16_t va = *(const uint16_t *)a;
+    uint16_t vb = *(const uint16_t *)b;
+    return (va > vb) - (va < vb);
+}
+
+static void adc_debug_print_summary(void) {
+    if (s_dbg_cnt == 0) { ESP_LOGI("ADC_DBG", "无样本"); return; }
+    for (int ch = 0; ch < 4; ch++) {
+        uint16_t sorted[ADC_DEBUG_MAX_SAMPLES];
+        uint32_t sum = 0;
+        uint16_t vmin = 4095, vmax = 0;
+        for (int i = 0; i < s_dbg_cnt; i++) {
+            uint16_t v = s_dbg_buf[ch][i];
+            sorted[i] = v; sum += v;
+            if (v < vmin) vmin = v;
+            if (v > vmax) vmax = v;
+        }
+        uint16_t mean = (uint16_t)(sum / s_dbg_cnt);
+        qsort(sorted, s_dbg_cnt, sizeof(uint16_t), cmp_u16);
+        uint16_t median = sorted[s_dbg_cnt / 2];
+        uint16_t p10    = sorted[s_dbg_cnt * 10 / 100];
+        uint16_t p90    = sorted[s_dbg_cnt * 90 / 100];
+        ESP_LOGI("ADC_DBG", "[%s] n=%u mean=%u med=%u min=%u max=%u p10=%u p90=%u Δ=%u",
+                 s_dbg_names[ch], s_dbg_cnt, mean, median, vmin, vmax, p10, p90, vmax - vmin);
+    }
+}
+
+static void adc_debug_poll(const uint16_t src[16], const uint16_t src_raw[16]) {
+    uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+    if (now - s_dbg_last_sa_chk >= 50) {
+        s_dbg_last_sa_chk = now;
+        bool sa = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
+        if (sa && !s_dbg_sa_prev) {
+            s_dbg_active = !s_dbg_active;
+            if (s_dbg_active) {
+                s_dbg_cnt = 0;
+                s_dbg_last_print = now;
+                ESP_LOGI("ADC_DBG", "========== 进入调试模式 ==========");
+            } else {
+                s_dbg_active = false;
+                adc_debug_print_summary();
+                ESP_LOGI("ADC_DBG", "========== 退出调试模式 ==========");
+            }
+        }
+        s_dbg_sa_prev = sa;
+    }
+
+    if (!s_dbg_active) return;
+    if (now - s_dbg_last_print < ADC_DEBUG_INTERVAL_MS) return;
+    s_dbg_last_print = now;
+
+    ESP_LOGI("ADC_DBG", "#%u R:r%u→%u P:r%u→%u T:r%u→%u Y:r%u→%u",
+             s_dbg_cnt,
+             src_raw[0], src[0], src_raw[1], src[1],
+             src_raw[2], src[2], src_raw[3], src[3]);
+
+    if (s_dbg_cnt < ADC_DEBUG_MAX_SAMPLES) {
+        for (int i = 0; i < 4; i++) s_dbg_buf[i][s_dbg_cnt] = src[i];
+        s_dbg_cnt++;
+    }
+}
+#else
+#define adc_debug_poll(src, raw) ((void)0)
+#endif
 
 static TaskHandle_t s_task_handle;
 static adc_channel_t channel[4] = {ADC_roll, ADC_pitch, ADC_throttle, ADC_yaw};
@@ -401,7 +491,7 @@ void ADC_TASK(void *arg)
                             uint16_t batch_avg = batch_sum[ch] / batch_count[ch];
                             uint16_t final_raw = moving_average_filter(ch, batch_avg);
 
-                            // 填入源数组 (只做 ADC→1000~2000 映射，不含 EPA/REV)
+                            // ADC→1000~2000 映射
                             switch (ch)
                             {
                                 case ADC_roll:
@@ -409,25 +499,19 @@ void ADC_TASK(void *arg)
                                     src_raw[0] = final_raw;
                                     break;
 
-                                case ADC_pitch:
-                                    if (stick_mode == 1) {
-                                        src[2] = map_joystick(final_raw, limit[1]);
-                                        src_raw[2] = final_raw;
-                                    } else {
-                                        src[1] = map_joystick(final_raw, limit[1]);
-                                        src_raw[1] = final_raw;
-                                    }
+                                case ADC_pitch: {
+                                    uint8_t out = (stick_mode == 1) ? 2 : 1;
+                                    src[out] = map_joystick(final_raw, limit[1]);
+                                    src_raw[out] = final_raw;
                                     break;
+                                }
 
-                                case ADC_throttle:
-                                    if (stick_mode == 1) {
-                                        src[1] = map_joystick(final_raw, limit[2]);
-                                        src_raw[1] = final_raw;
-                                    } else {
-                                        src[2] = map_joystick(final_raw, limit[2]);
-                                        src_raw[2] = final_raw;
-                                    }
+                                case ADC_throttle: {
+                                    uint8_t out = (stick_mode == 1) ? 1 : 2;
+                                    src[out] = map_joystick(final_raw, limit[2]);
+                                    src_raw[out] = final_raw;
                                     break;
+                                }
 
                                 case ADC_yaw:
                                     src[3] = 3000 - map_joystick(final_raw, limit[3]);
@@ -440,6 +524,7 @@ void ADC_TASK(void *arg)
             }
             // 读取开关 → 填 src[4..7]
             update_switch_channels(src, src_raw);
+            adc_debug_poll(src, src_raw);
             // ch_map 重映射 + EPA/REV → 写入 joy 结构体 (临界区: 不可与写入者交错)
             portENTER_CRITICAL(&cfg_lock);
             apply_ch_map_to_joy(joy, src, src_raw);

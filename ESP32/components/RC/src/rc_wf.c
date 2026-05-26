@@ -1085,6 +1085,27 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 }
             }
 
+            // ---- MAP 全通道重置 (还原默认) ----
+            else if (strcmp(text, "MAP_RESET") == 0) {
+                uint8_t identity[16];
+                for (int i = 0; i < 16; i++) identity[i] = (uint8_t)i;
+                portENTER_CRITICAL(&cfg_lock);
+                memcpy(ch_map, identity, sizeof(ch_map));
+                portEXIT_CRITICAL(&cfg_lock);
+                request_nvs_save();
+                ws_send_text(req, "MAP_OK\n");
+                // 下发完整 16 通道映射供前端刷新
+                char map_buf[128];
+                int off = snprintf(map_buf, sizeof(map_buf), "MAP:");
+                for (int i = 0; i < 16; i++) {
+                    off += snprintf(map_buf + off, sizeof(map_buf) - off,
+                                    "%d,%d%s", i + 1, ch_map[i], (i == 15) ? "\n" : ";");
+                    if (off >= (int)sizeof(map_buf)) break;
+                }
+                ws_send_text(req, map_buf);
+                ESP_LOGI(TAG, "MAP 已重置为默认 (identity)");
+            }
+
             // ---- MAP 通道映射 ----
             else if (strncmp(text, "MAP:", 4) == 0) {
                 char *payload = text + 4;

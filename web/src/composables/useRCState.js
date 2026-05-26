@@ -644,9 +644,8 @@ function importConfig(jsonStr) {
   function resetChannelMapping() {
     channelMapping.value.forEach(m => { m.current = m.default })
     if (!ws.value) return
-    const cmd = 'MAP:' + channelMapping.value.map(m => `${m.channel},${m.current}`).join(';')
     mapWriteState.value = 'sending'
-    ws.value.sendData(cmd)
+    ws.value.sendData('MAP_RESET')
   }
 
   function writeChannelMapping() {
