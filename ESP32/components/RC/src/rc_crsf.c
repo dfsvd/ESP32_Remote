@@ -101,7 +101,7 @@ bool crsf_is_half_duplex(void) { return s_cfg.half_duplex; }
 
 void crsf_set_channel(uint8_t channel_idx, uint16_t value_us) {
     if (channel_idx >= 16) return;
-    s_channels_11bit[channel_idx] = 172 + ((value_us - 1000) * (1811 - 172)) / 1000;
+    s_channels_11bit[channel_idx] = ((value_us - 880) * 8) / 5;
 }
 
 void crsf_send_device_ping(void) {
