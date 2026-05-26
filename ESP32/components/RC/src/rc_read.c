@@ -449,9 +449,9 @@ void ADC_TASK(void *arg)
 
     adc_continuous_evt_cbs_t cbs = { .on_conv_done = s_conv_done_cb,};
 
-    ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(handle, &cbs, NULL)); 
-    ESP_ERROR_CHECK(adc_continuous_start(handle)); 
-    key_init();
+    ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(handle, &cbs, NULL));
+    key_init();   // 必须在 adc_continuous_start 之前，否则 gpio_config 会覆盖 GPIO 39 的 ADC 配置
+    ESP_ERROR_CHECK(adc_continuous_start(handle));
     uint32_t adc_stall_ms = 0;
     while (1)
     {
@@ -459,7 +459,17 @@ void ADC_TASK(void *arg)
         uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));
         if (notified == 0) {
             adc_stall_ms += 200;
-            ESP_LOGW(TAG, "ADC ISR 超时 (%lums)，外设可能已停止", adc_stall_ms);
+            if (adc_stall_ms == 200) {
+                ESP_LOGW(TAG, "ADC ISR 超时，外设可能已停止");
+            }
+            // 连续超时超过 2 秒 → 尝试重启 ADC 外设
+            if (adc_stall_ms >= 2000) {
+                ESP_LOGW(TAG, "ADC 已停止 %lums，尝试重启...", adc_stall_ms);
+                adc_continuous_stop(handle);
+                vTaskDelay(pdMS_TO_TICKS(10));
+                adc_continuous_start(handle);
+                adc_stall_ms = 0;
+            }
         } else {
             adc_stall_ms = 0;
         }

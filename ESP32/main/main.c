@@ -46,6 +46,13 @@ static const char *TAG = "FPV_RC";
 #define AUTO_BIND_INTERVAL_MS           2000U
 #define AUTO_BIND_LINK_STABLE_MS        1200U
 
+// ---- 开机模式切换 ----
+#define BOOT_KEY_HOLD_MS            3000    // 按键长按判定时间
+#define BOOT_STICK_SELECT_TIMEOUT_MS 5000   // 摇杆选择超时
+#define BOOT_STICK_UP_THRESH        1300    // 右摇杆上打阈值 (<此值)
+#define BOOT_STICK_DOWN_THRESH      1700    // 右摇杆下打阈值 (>此值)
+#define BOOT_DEBOUNCE_MS            80      // 按键消抖时间
+
 /* =========================================================================
  * 全局状态
  * ========================================================================= */
@@ -331,16 +338,28 @@ static uint8_t find_bind_param_id(const crsf_state_t *state)
  * ========================================================================= */
 
 /**
- * @brief 根据 GPIO 拨码开关位置检测开机模式并初始化对应通信模块
- * @note  模式判定逻辑:
- *        CH1=高 → 纯射频模式 (不开启 USB/BLE/WiFi)
- *        CH1=低 + 三段开关上=低 → BLE 模式
- *        CH1=低 + 三段开关下=低 → WiFi 模式
- *        CH1=低 + 三段开关中位   → USB 模式
- *        CH3=低                 → 开启自动对频
- * @param host_mode_selected 输出: 是否进入主机模式 (USB/BLE/WiFi)
- * @param ble_mode           输出: 1=BLE 模式, 0=非 BLE
- * @param bind_mode_active   输出: 是否进入自动对频模式
+ * @brief 等待按键组合保持指定毫秒，任一松手即失败
+ * @return true=保持成功, false=有按键松手
+ */
+static bool hold_keys_ms(uint32_t ms, bool check_sa, bool check_sd)
+{
+    uint32_t start = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    while (1) {
+        uint32_t elapsed = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - start;
+        if (elapsed >= ms) return true;
+        if (check_sa && gpio_get_level(RC_SWITCH_SA_PIN) != 0) return false;
+        if (check_sd && gpio_get_level(RC_SWITCH_SD_PIN) != 0) return false;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+/**
+ * @brief 开机模式检测 — 按键 + 摇杆交互
+ * @note  优先级: SA+SD > SD > SA > 默认
+ *        SA+SD 长按 BOOT_KEY_HOLD_MS → WiFi
+ *        SD 按下                → 自动对频 + 纯射频
+ *        SA 长按 BOOT_KEY_HOLD_MS → 摇杆选择 (上=BLE, 下=USB)
+ *        无按键                 → 纯射频
  */
 static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode, bool *bind_mode_active)
 {
@@ -348,41 +367,71 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode, bool *
     *ble_mode           = 0;
     *bind_mode_active   = false;
 
-    bool ch1_low  = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
-    bool ch3_low  = (gpio_get_level(RC_SWITCH_SD_PIN) == 0);
-    bool up_low   = (gpio_get_level(RC_SWITCH_SC_UP_PIN) == 0);
-    bool down_low = (gpio_get_level(RC_SWITCH_SC_DOWN_PIN) == 0);
+    // 读取初始状态并消抖
+    bool sa = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
+    bool sd = (gpio_get_level(RC_SWITCH_SD_PIN) == 0);
+    if (sa || sd) {
+        vTaskDelay(pdMS_TO_TICKS(BOOT_DEBOUNCE_MS));
+        if (sa) sa = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
+        if (sd) sd = (gpio_get_level(RC_SWITCH_SD_PIN) == 0);
+    }
 
-    if (ch1_low)
-    {
-        *host_mode_selected = true;
-        if (up_low)
-        {
-            ble_init(&joy);
-            *ble_mode = 1;
-            ESP_LOGI(TAG, "开机模式: BLE (CH1低 + 3段上低)");
-        }
-        else if (down_low)
-        {
+    // ---- 优先级 1: SA+SD 同时长按 → WiFi ----
+    if (sa && sd) {
+        ESP_LOGI(TAG, "检测到 SA+SD 同时按下，保持 %dms 进入 WiFi 模式...", BOOT_KEY_HOLD_MS);
+        if (hold_keys_ms(BOOT_KEY_HOLD_MS, true, true)) {
+            ESP_LOGI(TAG, ">> 进入 WiFi 模式");
             rc_wifi_server_init(&joy);
-            ESP_LOGI(TAG, "开机模式: WiFi (CH1低 + 3段下低)");
+            *host_mode_selected = true;
+            return;
         }
-        else
-        {
-            usb_init();
-            ESP_LOGI(TAG, "开机模式: USB (CH1低 + 3段中位)");
-        }
-    }
-    else
-    {
-        ESP_LOGI(TAG, "开机模式: 纯射频模式 (CH1高)");
+        // 组合失败，重新读取各自状态
+        sa = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
+        sd = (gpio_get_level(RC_SWITCH_SD_PIN) == 0);
     }
 
-    if (ch3_low)
-    {
+    // ---- 优先级 2: SD 单独按下 → 自动对频 ----
+    if (sd) {
+        ESP_LOGI(TAG, ">> 检测到 SD 按下，进入自动对频模式（纯射频）");
         *bind_mode_active = true;
-        ESP_LOGI(TAG, "检测到 CH3 低电平，进入开机自动对频模式");
+        return;
     }
+
+    // ---- 优先级 3: SA 单独长按 → 摇杆选择 ----
+    if (sa) {
+        ESP_LOGI(TAG, "检测到 SA 按下，保持 %dms 进入模式选择...", BOOT_KEY_HOLD_MS);
+        if (hold_keys_ms(BOOT_KEY_HOLD_MS, true, false)) {
+            ESP_LOGI(TAG, ">> 进入模式选择: 右摇杆上=BLE, 下=USB (超时 %dms)",
+                     BOOT_STICK_SELECT_TIMEOUT_MS);
+            uint32_t sel_start = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
+            while (1) {
+                uint32_t elapsed = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - sel_start;
+                if (elapsed >= BOOT_STICK_SELECT_TIMEOUT_MS) {
+                    ESP_LOGI(TAG, ">> 选择超时，回退纯射频模式");
+                    break;
+                }
+                uint16_t pitch = joy.pitch;
+                if (pitch < BOOT_STICK_UP_THRESH) {
+                    ESP_LOGI(TAG, ">> 右摇杆上 → 进入 BLE 模式");
+                    ble_init(&joy);
+                    *host_mode_selected = true;
+                    *ble_mode = 1;
+                    return;
+                }
+                if (pitch > BOOT_STICK_DOWN_THRESH) {
+                    ESP_LOGI(TAG, ">> 右摇杆下 → 进入 USB 模式");
+                    usb_init();
+                    *host_mode_selected = true;
+                    return;
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+        }
+        return;
+    }
+
+    // ---- 优先级 4: 默认纯射频 ----
+    ESP_LOGI(TAG, ">> 开机模式: 纯射频 (无按键)");
 }
 
 /* =========================================================================
@@ -545,13 +594,7 @@ void app_main(void)
     bool    host_mode_selected = false;
     uint8_t ble_mode           = 0;
     bool    bind_mode_active   = false;
-    // detect_boot_mode(&host_mode_selected, &ble_mode, &bind_mode_active);
-
-    // 测试
-    // usb_init();
-    // ble_init(&joy);
-    rc_wifi_server_init(&joy);
-    ESP_LOGI(TAG, "Wi-Fi已初始化 (测试模式)");
+    detect_boot_mode(&host_mode_selected, &ble_mode, &bind_mode_active);
 
     /* ---- 7. 主循环 ---- */
     struct auto_bind_ctx bind = {0};
