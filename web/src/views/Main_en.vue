@@ -211,6 +211,7 @@
             :menus="crsfMenus"
             :status="crsfStatus"
             :loading="isCrsfLoading"
+            :bindState="bindState"
             :t="t"
             @refresh="refreshCrsf"
             @bind="handleCrsfBind"
@@ -256,7 +257,7 @@ import ChannelBar from '../components/ChannelBar.vue'
 const {
   ws, isConnected, currentTab, configSubTab, currentLang, simMode,
   showCalibrationModal, stickMode, channelMapping, availableSwitches,
-  isCrsfLoading, crsfStatus, channels, crsfMenus,
+  isCrsfLoading, bindState, crsfStatus, channels, crsfMenus,
   epaData, revMask,
   leftStick, rightStick, visibleChannels,
   btnCfg,

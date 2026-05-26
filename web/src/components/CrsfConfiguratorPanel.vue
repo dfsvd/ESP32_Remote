@@ -6,12 +6,13 @@
           刷新
         </button>
         <button
-          class="px-[18px] py-[12px] border border-transparent bg-gradient-to-br from-darwin-amber to-darwin-orange text-black font-bold rounded-full shadow-[0_16px_30px_rgba(245,166,35,0.2)] cursor-pointer transition-all hover:-translate-y-px disabled:opacity-60 disabled:cursor-not-allowed"
+          class="px-[18px] py-[12px] border border-transparent font-bold rounded-full shadow-[0_16px_30px_rgba(245,166,35,0.2)] cursor-pointer transition-all hover:-translate-y-px disabled:opacity-60 disabled:cursor-not-allowed"
+          :class="bindBtnClass"
           type="button"
-          :disabled="loading || !bindItem"
+          :disabled="loading || !bindItem || bindState === 'binding'"
           @click="triggerBind"
         >
-          {{ loading ? "处理中..." : "开始对频" }}
+          {{ bindBtnText }}
         </button>
       </div>
 
@@ -156,6 +157,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  bindState: {
+    type: String,
+    default: 'idle',
+  },
   status: {
     type: Object,
     default: () => ({
@@ -282,6 +287,24 @@ const expandedIds = ref(new Set());
 const bindItem = computed(() =>
   normalizedMenus.value.find((item) => item.kind === "command" && isBindLike(item.name)) || null
 );
+
+const bindBtnText = computed(() => {
+  switch (props.bindState) {
+    case 'binding': return '对频中...'
+    case 'ok':      return '对频成功！'
+    case 'timeout': return '对频超时'
+    default:        return '开始对频'
+  }
+})
+
+const bindBtnClass = computed(() => {
+  switch (props.bindState) {
+    case 'binding': return 'bg-gradient-to-br from-darwin-amber to-darwin-orange text-black animate-pulse'
+    case 'ok':      return 'bg-gradient-to-br from-green-400 to-emerald-500 text-black'
+    case 'timeout': return 'bg-gradient-to-br from-red-400 to-rose-500 text-white'
+    default:        return 'bg-gradient-to-br from-darwin-amber to-darwin-orange text-black'
+  }
+})
 
 const visibleItems = computed(() => {
   const flattened = [];

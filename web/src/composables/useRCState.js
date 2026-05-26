@@ -71,6 +71,8 @@ const fullChMap = ref(Array.from({ length: 16 }, (_, i) => i))
 
 // --- CRSF ---
 const isCrsfLoading = ref(false)
+const bindState = ref('idle') // 'idle' | 'binding' | 'ok' | 'timeout'
+let bindTimeoutTimer = null
 const linkWireMode = ref('dual')
 const isSwitchingLinkMode = ref(false)
 const crsfStatus = ref({
@@ -232,6 +234,7 @@ export function useRCState() {
   }
 
   function handleCrsfBind(item) {
+    bindState.value = 'binding'
     isCrsfLoading.value = true
     ws.value?.sendData(`CRSF_BIND:${item.id}`)
     setTimeout(() => isCrsfLoading.value = false, 600)
@@ -326,6 +329,28 @@ function onCalibrationResult(results) {
       }
       if (line.startsWith('MAP:')) {
         parseMap(line)
+        return
+      }
+      if (line.startsWith('BIND_SENT')) {
+        bindState.value = 'binding'
+        // 30 秒后还没收到 OK 就自动重置（ESP32 端也会发 TIMEOUT）
+        if (bindTimeoutTimer) clearTimeout(bindTimeoutTimer)
+        bindTimeoutTimer = setTimeout(() => {
+          if (bindState.value === 'binding') bindState.value = 'timeout'
+        }, 32000)
+        return
+      }
+      if (line.startsWith('BIND_OK')) {
+        bindState.value = 'ok'
+        if (bindTimeoutTimer) { clearTimeout(bindTimeoutTimer); bindTimeoutTimer = null }
+        // 3 秒后自动回到 idle
+        setTimeout(() => { if (bindState.value === 'ok') bindState.value = 'idle' }, 3000)
+        return
+      }
+      if (line.startsWith('BIND_TIMEOUT')) {
+        bindState.value = 'timeout'
+        if (bindTimeoutTimer) { clearTimeout(bindTimeoutTimer); bindTimeoutTimer = null }
+        setTimeout(() => { if (bindState.value === 'timeout') bindState.value = 'idle' }, 4000)
         return
       }
       if (line.startsWith('MAP_OK')) {
@@ -683,6 +708,7 @@ function importConfig(jsonStr) {
     fullChMap,
     availableSwitches,
     isCrsfLoading,
+    bindState,
     linkWireMode,
     isSwitchingLinkMode,
     crsfStatus,

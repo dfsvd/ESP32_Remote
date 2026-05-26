@@ -11,6 +11,7 @@ extern "C" {
 // 启动 WiFi (AP模式) 和 WebSocket 服务器
 // 传入 joy 结构体指针，以便在后台任务中读取并广播通道值
 void rc_wifi_server_init(fpv_joystick_report_t *joy);
+void rc_wf_poll_bind(void);
 void load_settings_from_nvs(void);
 void request_nvs_save(void);
 bool get_saved_crsf_link_mode(bool *half_duplex);

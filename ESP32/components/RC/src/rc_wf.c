@@ -23,6 +23,11 @@ static httpd_handle_t server = NULL;
 static bool s_saved_crsf_half_duplex = false;
 static bool s_has_saved_crsf_link_mode = false;
 
+// ---- 对频状态机 ----
+static bool     s_bind_pending   = false;
+static uint32_t s_bind_start_ms  = 0;
+#define BIND_TIMEOUT_MS  30000
+
 // 配置集 (profile) 常量
 #define MAX_PROFILES 8
 #define PROFILE_NAME_LEN 16
@@ -1012,6 +1017,10 @@ static esp_err_t ws_handler(httpd_req_t *req)
                     param_id > 0 && param_id <= CRSF_MAX_MENU_ITEMS) {
                     log_crsf_web_action("bind", (uint8_t)param_id, 1, false);
                     crsf_write_menu_value((uint8_t)param_id, 1);
+                    s_bind_pending  = true;
+                    s_bind_start_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                    ws_send_text(req, "BIND_SENT\n");
+                    ESP_LOGI(TAG, "对频命令已发送，开始监听链路状态...");
                 } else {
                     ESP_LOGW(TAG, "非法 CRSF_BIND 指令: %s", text);
                 }
@@ -1437,4 +1446,23 @@ void rc_wifi_server_init(fpv_joystick_report_t *joy)
 
 
     start_webserver(joy);
+}
+
+void rc_wf_poll_bind(void)
+{
+    if (!s_bind_pending)
+        return;
+
+    crsf_state_t *state = crsf_get_state();
+    uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+    if (state->is_linked) {
+        ESP_LOGI(TAG, "对频成功！接收机已连接");
+        ws_broadcast_text("BIND_OK\n");
+        s_bind_pending = false;
+    } else if (now_ms - s_bind_start_ms > BIND_TIMEOUT_MS) {
+        ESP_LOGW(TAG, "对频超时（%ums），未检测到接收机连接", BIND_TIMEOUT_MS);
+        ws_broadcast_text("BIND_TIMEOUT\n");
+        s_bind_pending = false;
+    }
 }

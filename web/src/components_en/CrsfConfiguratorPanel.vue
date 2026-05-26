@@ -10,13 +10,14 @@
         >
           {{ t.refresh }}
         </button>
-        <button 
-          class="px-[18px] py-[12px] border border-transparent bg-gradient-to-br from-darwin-amber to-darwin-orange text-black font-bold rounded-full shadow-[0_16px_30px_rgba(245,166,35,0.2)] cursor-pointer transition-all hover:-translate-y-px disabled:opacity-60 disabled:cursor-not-allowed"
+        <button
+          class="px-[18px] py-[12px] border border-transparent font-bold rounded-full shadow-[0_16px_30px_rgba(245,166,35,0.2)] cursor-pointer transition-all hover:-translate-y-px disabled:opacity-60 disabled:cursor-not-allowed"
+          :class="bindBtnClass"
           type="button"
-          :disabled="loading || !bindItem"
+          :disabled="loading || !bindItem || bindState === 'binding'"
           @click="handleBind"
         >
-          {{ loading ? t.processing : t.startBind }}
+          {{ bindBtnText }}
         </button>
       </div>
 
@@ -154,6 +155,7 @@ import { ref, computed, watch } from 'vue';
 
 const props = defineProps({
   loading: { type: Boolean, default: false },
+  bindState: { type: String, default: 'idle' },
   status: { type: Object, default: () => ({ isReady: false, isLinked: false, rssi: null, lq: null, loadedParams: 0, totalParams: 0, deviceLabel: '' }) },
   menus: { type: Array, default: () => [] },
   t: { type: Object, default: () => ({}) }
@@ -260,6 +262,24 @@ const flattenedMenuTree = computed(() => {
 const bindItem = computed(() => {
   return normalizedMenus.value.find(m => m.kind === 'command' && isBindAction(m.name)) || null;
 });
+
+const bindBtnText = computed(() => {
+  switch (props.bindState) {
+    case 'binding': return props.t.binding || 'Binding...'
+    case 'ok':      return props.t.bindOk || 'Bind OK!'
+    case 'timeout': return props.t.bindTimeout || 'Timeout'
+    default:        return props.t.startBind || 'Start Bind'
+  }
+})
+
+const bindBtnClass = computed(() => {
+  switch (props.bindState) {
+    case 'binding': return 'bg-gradient-to-br from-darwin-amber to-darwin-orange text-black animate-pulse'
+    case 'ok':      return 'bg-gradient-to-br from-green-400 to-emerald-500 text-black'
+    case 'timeout': return 'bg-gradient-to-br from-red-400 to-rose-500 text-white'
+    default:        return 'bg-gradient-to-br from-darwin-amber to-darwin-orange text-black'
+  }
+})
 
 function isSelected(id) {
   return expandedIds.value.has(id);

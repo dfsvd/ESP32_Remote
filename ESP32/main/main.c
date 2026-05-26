@@ -606,6 +606,9 @@ void app_main(void)
         /* --- 自动对频 --- */
         poll_auto_bind(state, now_ms, &bind);
 
+        /* --- Web 对频状态监控 --- */
+        rc_wf_poll_bind();
+
         /* --- USB HID 数据发送 --- */
         if (tud_mounted())
             app_send_fpv_data(&joy);
