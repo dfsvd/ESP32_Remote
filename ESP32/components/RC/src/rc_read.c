@@ -452,13 +452,22 @@ void ADC_TASK(void *arg)
     ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(handle, &cbs, NULL)); 
     ESP_ERROR_CHECK(adc_continuous_start(handle)); 
     key_init();
+    uint32_t adc_stall_ms = 0;
     while (1)
     {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        // 源数组: ch_map 重映射前的 16 路物理源值
+        // 等待 ISR 通知，超时 200ms 防止 ADC 外设静默停止
+        uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(200));
+        if (notified == 0) {
+            adc_stall_ms += 200;
+            ESP_LOGW(TAG, "ADC ISR 超时 (%lums)，外设可能已停止", adc_stall_ms);
+        } else {
+            adc_stall_ms = 0;
+        }
+
         uint16_t src[16]     = {1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500};
         uint16_t src_raw[16] = {1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500,1500};
 
+        // 一次性排空 DMA 缓冲区中的所有数据
         while (1)
         {
             if(adc_continuous_read(handle, result, READ_LEN, &ret_num, 0) == ESP_OK)
@@ -522,14 +531,19 @@ void ADC_TASK(void *arg)
                     }
                 }
             }
-            // 读取开关 → 填 src[4..7]
-            update_switch_channels(src, src_raw);
-            adc_debug_poll(src, src_raw);
-            // ch_map 重映射 + EPA/REV → 写入 joy 结构体 (临界区: 不可与写入者交错)
-            portENTER_CRITICAL(&cfg_lock);
-            apply_ch_map_to_joy(joy, src, src_raw);
-            portEXIT_CRITICAL(&cfg_lock);
-            vTaskDelay(1);
+            else
+            {
+                // DMA 缓冲已排空，退出内层循环，回到外层等待 ISR
+                break;
+            }
         }
+
+        // 读取开关 → 填 src[4..7]
+        update_switch_channels(src, src_raw);
+        adc_debug_poll(src, src_raw);
+        // ch_map 重映射 + EPA/REV → 写入 joy 结构体 (临界区: 不可与写入者交错)
+        portENTER_CRITICAL(&cfg_lock);
+        apply_ch_map_to_joy(joy, src, src_raw);
+        portEXIT_CRITICAL(&cfg_lock);
     }
 }

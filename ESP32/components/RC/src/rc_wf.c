@@ -448,6 +448,47 @@ static void log_crsf_web_action(const char *action, uint8_t param_id, int value,
     ESP_LOGI(TAG, "网页命令 %s: id=%u name=%s value=%d", action, param_id, name, value);
 }
 
+#define WS_MAX_FAILURES 3
+
+static struct { int fd; uint8_t failures; } s_ws_track[8];
+
+// 发送到单个 WS 客户端，连续失败 ≥WS_MAX_FAILURES 次则主动关闭连接
+static bool ws_send_to_client(int fd, httpd_ws_frame_t *pkt)
+{
+    esp_err_t ret = httpd_ws_send_frame_async(server, fd, pkt);
+    if (ret == ESP_OK) {
+        for (int i = 0; i < 8; i++) {
+            if (s_ws_track[i].fd == fd) { s_ws_track[i].failures = 0; break; }
+        }
+        return true;
+    }
+
+    int slot = -1;
+    for (int i = 0; i < 8; i++) {
+        if (s_ws_track[i].fd == fd) { slot = i; break; }
+        if (s_ws_track[i].fd == 0 && slot < 0) slot = i;
+    }
+    if (slot >= 0) {
+        s_ws_track[slot].fd = fd;
+        s_ws_track[slot].failures++;
+        if (s_ws_track[slot].failures >= WS_MAX_FAILURES) {
+            ESP_LOGW(TAG, "WS fd=%d send failed %d times, closing", fd, WS_MAX_FAILURES);
+            httpd_sess_trigger_close(server, fd);
+            s_ws_track[slot].fd = 0;
+            s_ws_track[slot].failures = 0;
+        }
+    }
+    return false;
+}
+
+// 客户端 fd 断开时清理追踪状态
+static void ws_track_cleanup(int fd)
+{
+    for (int i = 0; i < 8; i++) {
+        if (s_ws_track[i].fd == fd) { s_ws_track[i].fd = 0; s_ws_track[i].failures = 0; return; }
+    }
+}
+
 static void ws_broadcast_text(const char *payload)
 {
     if (!server || !payload || payload[0] == '\0') {
@@ -468,11 +509,7 @@ static void ws_broadcast_text(const char *payload)
 
     for (size_t i = 0; i < max_clients; ++i) {
         if (httpd_ws_get_fd_info(server, client_fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
-            esp_err_t ret = httpd_ws_send_frame_async(server, client_fds[i], &ws_pkt);
-            if (ret != ESP_OK) {
-                ESP_LOGD(TAG, "ws_broadcast_text 发送失败 fd=%d ret=%s",
-                         client_fds[i], esp_err_to_name(ret));
-            }
+            ws_send_to_client(client_fds[i], &ws_pkt);
         }
     }
 }
@@ -902,10 +939,23 @@ static esp_err_t ws_handler(httpd_req_t *req)
     httpd_ws_frame_t ws_pkt;
     uint8_t *buf = NULL;
     memset(&ws_pkt, 0, sizeof(ws_pkt));
-    ws_pkt.type = HTTPD_WS_TYPE_TEXT;
 
     esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
     if (ret != ESP_OK) return ret;
+
+    // 处理非 TEXT 帧: CLOSE → 清理追踪; PING → 回复 PONG
+    if (ws_pkt.type == HTTPD_WS_TYPE_CLOSE) {
+        int fd = httpd_req_to_sockfd(req);
+        if (fd >= 0) ws_track_cleanup(fd);
+        ESP_LOGI(TAG, "WS close fd=%d", fd);
+        return ESP_OK;
+    }
+    if (ws_pkt.type == HTTPD_WS_TYPE_PING) {
+        httpd_ws_frame_t pong = { .type = HTTPD_WS_TYPE_PONG, .payload = ws_pkt.payload, .len = ws_pkt.len };
+        httpd_ws_send_frame(req, &pong);
+        return ESP_OK;
+    }
+    if (ws_pkt.type != HTTPD_WS_TYPE_TEXT) return ESP_OK;
 
     if (ws_pkt.len > 0) {
         buf = calloc(1, ws_pkt.len + 1);
@@ -1304,7 +1354,7 @@ static void ws_broadcast_task(void *arg)
                 if (httpd_get_client_list(server, &max_clients, client_fds) == ESP_OK) {
                     for (int i = 0; i < max_clients; i++) {
                         if (httpd_ws_get_fd_info(server, client_fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
-                            httpd_ws_send_frame_async(server, client_fds[i], &ws_pkt);
+                            ws_send_to_client(client_fds[i], &ws_pkt);
                         }
                     }
                 }
@@ -1364,6 +1414,7 @@ static void start_webserver(fpv_joystick_report_t *joy)
     config.max_uri_handlers = 10;
     config.max_open_sockets = 13;
     config.lru_purge_enable = true;
+    config.send_wait_timeout = 5;
 
     ESP_LOGI(TAG, "启动 HTTP 服务器，端口: %d", config.server_port);
     if (httpd_start(&server, &config) == ESP_OK) {
