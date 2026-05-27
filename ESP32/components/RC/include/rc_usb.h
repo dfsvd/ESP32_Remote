@@ -23,6 +23,7 @@ extern "C"
         SIM_MODE_XBOX         // Xbox 360 手柄模式 (大疆虚拟飞行专版)
     } sim_mode_t;
 
+    // 内部中间结构 (16 通道)
     typedef struct
     {
         uint16_t ch1;
@@ -42,6 +43,20 @@ extern "C"
         uint16_t ch15;
         uint16_t ch16;
     } fpv_usb_report_t;
+
+    // USB HID 最终报告 (8轴 + 24按键 = 19 字节)
+    typedef struct __attribute__((packed))
+    {
+        uint16_t ch1;      // X  - Roll
+        uint16_t ch2;      // Y  - Pitch
+        uint16_t ch3;      // Z  - Throttle
+        uint16_t ch4;      // Rx - Yaw
+        uint16_t ch5;      // Ry - SA
+        uint16_t ch6;      // Rz - SB
+        uint16_t ch7;      // Slider - SC
+        uint16_t ch8;      // Dial - SD
+        uint8_t  buttons[3]; // 24 按键 (默认全 0)
+    } usb_hid_report_t;
 
     typedef struct __attribute__((packed))
     {

@@ -12,10 +12,10 @@ void build_usb_channel_report(const fpv_joystick_report_t *joy, fpv_usb_report_t
     report->ch2  = joy->pitch;
     report->ch3  = joy->throttle;
     report->ch4  = joy->yaw;
-    report->ch5  = joy->aux1;
-    report->ch6  = joy->aux2;
-    report->ch7  = joy->aux3;
-    report->ch8  = joy->aux4;
+    report->ch5  = joy->aux1;     // SA
+    report->ch6  = joy->aux2;     // SB
+    report->ch7  = joy->aux3;     // SC
+    report->ch8  = joy->aux4;     // SD
     report->ch9  = 1500;
     report->ch10 = 1500;
     report->ch11 = 1500;
@@ -80,51 +80,37 @@ void build_hid_axes_report(const fpv_usb_report_t *usb_report, fpv_hid_axes_repo
 }
 
 // =======================================================================
-// [第一部分] 标准 HID FPV 模式描述符 (扩充为 16 通道版)
+// [第一部分] 标准 HID FPV 模式描述符 (8轴 + 24按键)
 // =======================================================================
 const uint8_t hid_report_descriptor_default[] = {
     HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP), HID_USAGE(HID_USAGE_DESKTOP_JOYSTICK),
     HID_COLLECTION(HID_COLLECTION_APPLICATION),
     HID_REPORT_ID(1)
 
-    // --- CH1 ~ CH8: 标准 8 轴 (主摇杆 + 滑块旋钮) ---
+    // 8 轴: 按 Usage ID 排序 (0x30~0x37)
     HID_USAGE_PAGE(HID_USAGE_PAGE_DESKTOP),
-    // 为了兼容大多数模拟器的轴编号习惯，这里把前四个主通道按下面顺序暴露：
-    // Axis1 = X = Roll
-    // Axis2 = Y = Pitch
-    // Axis3 = Z = Yaw
-    // Axis4 = Rx = Throttle
     HID_USAGE(HID_USAGE_DESKTOP_X),      // CH1: Roll
     HID_USAGE(HID_USAGE_DESKTOP_Y),      // CH2: Pitch
-    HID_USAGE(HID_USAGE_DESKTOP_RZ),     // CH3: Yaw
-    HID_USAGE(HID_USAGE_DESKTOP_RX),     // CH4: Throttle
-    HID_USAGE(HID_USAGE_DESKTOP_RY),     // CH5: Aux1
-    HID_USAGE(HID_USAGE_DESKTOP_SLIDER), // CH6: Aux2
-    HID_USAGE(HID_USAGE_DESKTOP_DIAL),   // CH7: Aux3
-    HID_USAGE(HID_USAGE_DESKTOP_WHEEL),  // CH8: Aux4
+    HID_USAGE(HID_USAGE_DESKTOP_Z),      // CH3: Throttle
+    HID_USAGE(HID_USAGE_DESKTOP_RX),     // CH4: Yaw
+    HID_USAGE(HID_USAGE_DESKTOP_RY),     // CH5: SA
+    HID_USAGE(HID_USAGE_DESKTOP_RZ),     // CH6: SB
+    HID_USAGE(HID_USAGE_DESKTOP_SLIDER), // CH7: SC
+    HID_USAGE(HID_USAGE_DESKTOP_DIAL),   // CH8: SD
     HID_LOGICAL_MIN_N(1000, 2), HID_LOGICAL_MAX_N(2000, 2), HID_REPORT_COUNT(8),
     HID_REPORT_SIZE(16), HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE),
 
-    // --- CH9 ~ CH16: 额外 8 轴 (数字开关转模拟量) ---
-    // 为了防止与 Desktop 页面冲突，放到 Simulation 页面
-
-    HID_USAGE_PAGE(0x02), // 0x02 = Simulation Controls Page
-    HID_USAGE(0xC8),      // 0xC8 = Steering (CH9: sw1)
-    HID_USAGE(0xC4),      // 0xC4 = Accelerator (CH10: sw2)
-    HID_USAGE(0xC5),      // 0xC5 = Brake (CH11: sw3)
-    HID_USAGE(0xC6),      // 0xC6 = Clutch (CH12: sw4)
-    HID_USAGE(0xBA),      // 0xBA = 自定义 1 (CH13: sw5)
-    HID_USAGE(0xBB),      // 0xBB = 自定义 2 (CH14: sw6)
-    HID_USAGE(0xBC),      // 0xBC = 自定义 3 (CH15: sw7)
-    HID_USAGE(0xBD),      // 0xBD = 自定义 4 (CH16: sw8)
-    HID_LOGICAL_MIN_N(1000, 2), HID_LOGICAL_MAX_N(2000, 2), HID_REPORT_COUNT(8),
-    HID_REPORT_SIZE(16), HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE),
+    // 24 按键 (1bit, 默认全 0)
+    HID_USAGE_PAGE(HID_USAGE_PAGE_BUTTON),
+    HID_USAGE_MIN(1), HID_USAGE_MAX(24),
+    HID_LOGICAL_MIN(0), HID_LOGICAL_MAX(1),
+    HID_REPORT_SIZE(1), HID_REPORT_COUNT(24),
+    HID_INPUT(HID_DATA | HID_VARIABLE | HID_ABSOLUTE),
 
     HID_COLLECTION_END};
 
 static const uint8_t hid_configuration_descriptor_default[] = {
     TUD_CONFIG_DESCRIPTOR(1, 1, 0, TUSB_DESC_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-    // 【关键修改】倒数第二个参数从 16 改为 64，以容纳 32 字节的报文
     TUD_HID_DESCRIPTOR(0, 4, false, sizeof(hid_report_descriptor_default), 0x81, 64, 5),
 };
 const char *hid_string_descriptor[] = {
@@ -132,7 +118,7 @@ const char *hid_string_descriptor[] = {
 };
 
 // =======================================================================
-// [第二部分] XBox 360 模式描述符 (原生硬核版 - 修复了64字节和0x31)
+// [第二部分] XBox 360 模式描述符
 // =======================================================================
 static const tusb_desc_device_t xinput_device_descriptor = {.bLength         = 18,
                                                             .bDescriptorType = TUSB_DESC_DEVICE,
@@ -167,10 +153,10 @@ const char *xinput_string_descriptor[] = {(char[]){0x09, 0x04}, "Microsoft Corpo
                                           "Controller", "08FEC93"};
 
 // =======================================================================
-// [第三部分] TinyUSB 回调函数
+// [第三部分] TinyUSB 回调
 // =======================================================================
 
-// 1. HID 回调
+// HID 报告描述符回调
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance)
 {
     return hid_report_descriptor_default;
@@ -185,7 +171,7 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 {
 }
 
-// 2. Vendor 回调 (处理微软安全验证)
+// Vendor 回调 (Xbox 安全验证)
 bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage,
                                 tusb_control_request_t const *request)
 {
@@ -196,7 +182,6 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage,
     {
         if (request->bmRequestType_bit.direction == TUSB_DIR_IN)
         {
-            // 【必须加 static】防止内存被回收导致发送死机
             static uint8_t buf[256] = {0};
             return tud_control_xfer(rhport, request, buf, request->wLength);
         }
@@ -204,8 +189,9 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage,
     return false;
 }
 // =======================================================================
-// [第四部分] 应用层数据发送逻辑
+// [第四部分] 数据发送
 // =======================================================================
+
 void app_send_fpv_data(fpv_joystick_report_t *joy)
 {
     if (!tud_mounted())
@@ -218,8 +204,30 @@ void app_send_fpv_data(fpv_joystick_report_t *joy)
     {
         if (tud_hid_ready())
         {
-            // 只发送整理后的 16 个标准输出通道，避免把 raw 校准值混进 HID 报文。
-            tud_hid_report(1, &usb_report, sizeof(usb_report));
+            usb_hid_report_t hid_report;
+            memset(&hid_report, 0, sizeof(hid_report));
+            hid_report.ch1 = usb_report.ch1;
+            hid_report.ch2 = usb_report.ch2;
+            hid_report.ch3 = usb_report.ch3;
+            hid_report.ch4 = usb_report.ch4;
+            hid_report.ch5 = usb_report.ch5;
+            hid_report.ch6 = usb_report.ch6;
+            hid_report.ch7 = usb_report.ch7;
+            hid_report.ch8 = usb_report.ch8;
+
+            tud_hid_report(1, &hid_report, sizeof(hid_report));
+
+            static TickType_t last_trace_tick = 0;
+            TickType_t now = xTaskGetTickCount();
+            if ((now - last_trace_tick) >= pdMS_TO_TICKS(500)) {
+                last_trace_tick = now;
+                ESP_LOGI(TAG,
+                    "USB HID X(Roll)=%u Y(Pitch)=%u Z(Thr)=%u Rx(Yaw)=%u "
+                    "Ry(SA)=%u Rz(SB)=%u Slider(SC)=%u Dial(SD)=%u B=0x%02X",
+                    hid_report.ch1, hid_report.ch2, hid_report.ch3, hid_report.ch4,
+                    hid_report.ch5, hid_report.ch6, hid_report.ch7, hid_report.ch8,
+                    hid_report.buttons);
+            }
         }
     }
     else if (current_sim_mode == SIM_MODE_XBOX)
@@ -227,8 +235,6 @@ void app_send_fpv_data(fpv_joystick_report_t *joy)
         xinput_report_t report = {.type = 0x00, .size = 0x14, .buttons = 0, .lt = 0, .rt = 0};
         memset(report.reserved, 0, sizeof(report.reserved));
 
-        // Xbox 主四轴按当前测试结果修正：
-        // 左杆左右 = Throttle，左杆上下 = Yaw，右杆左右 = Roll，右杆上下 = Pitch。
         report.lx = map_axis_centered(usb_report.ch3, false);
         report.ly = map_axis_centered(usb_report.ch4, false);
         report.ry = map_axis_centered(usb_report.ch1, false);
@@ -246,13 +252,13 @@ void app_send_fpv_data(fpv_joystick_report_t *joy)
         if (usb_report.ch8 > 1500)
             report.buttons |= (1 << 15); // Y
         if (usb_report.ch9 > 1500)
-            report.buttons |= (1 << 8); // LB
+            report.buttons |= (1 << 8);  // LB
         if (usb_report.ch10 > 1500)
-            report.buttons |= (1 << 9); // RB
+            report.buttons |= (1 << 9);  // RB
         if (usb_report.ch11 > 1500)
-            report.buttons |= (1 << 5); // BACK
+            report.buttons |= (1 << 5);  // BACK
         if (usb_report.ch12 > 1500)
-            report.buttons |= (1 << 4); // START
+            report.buttons |= (1 << 4);  // START
 
         tud_vendor_n_write(0, (uint8_t *)&report, sizeof(report));
         tud_vendor_n_flush(0);
@@ -260,18 +266,18 @@ void app_send_fpv_data(fpv_joystick_report_t *joy)
 }
 
 // =======================================================================
-// [第五部分] 初始化与模式选择
+// [第五部分] 初始化
 // =======================================================================
+
 void usb_init_mode(sim_mode_t mode)
 {
     current_sim_mode = mode;
-    ESP_LOGI(TAG,"当前USB模式为Mode:%d",mode);
+    ESP_LOGI(TAG, "USB init mode: %d", mode);
 
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
 
     if (mode == SIM_MODE_XBOX)
     {
-        // 挂载 Xbox 描述符
         tusb_cfg.descriptor.device            = &xinput_device_descriptor;
         tusb_cfg.descriptor.full_speed_config = xinput_configuration_descriptor;
         tusb_cfg.descriptor.string            = xinput_string_descriptor;
@@ -279,28 +285,21 @@ void usb_init_mode(sim_mode_t mode)
     }
     else
     {
-        // 挂载标准 HID 描述符
         tusb_cfg.descriptor.device            = NULL;
         tusb_cfg.descriptor.full_speed_config = hid_configuration_descriptor_default;
         tusb_cfg.descriptor.string            = hid_string_descriptor;
-        tusb_cfg.descriptor.string_count      = 4; // 这里确保不要越界
+        tusb_cfg.descriptor.string_count      = 4;
     }
 
     ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
-    ESP_LOGI(TAG, "USB初始化完成");
+    ESP_LOGI(TAG, "USB init done");
 }
 
 void usb_init(void)
 {
-    // 默认开启 XBOX 模式
     usb_init_mode(current_sim_mode);
 }
 
-/**
- * @brief 判断 USB 是否已连接并处于正常工作状态
- * @return true   - USB 已挂载，可收发数据
- * @return false  - USB 未连接或未完成枚举
- */
 bool usb_is_connected(void)
 {
     return tud_mounted();
