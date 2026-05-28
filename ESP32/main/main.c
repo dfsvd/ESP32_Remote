@@ -17,6 +17,7 @@
 #include "nvs_flash.h"
 #include "rc_ble.h"
 #include "rc_crsf.h"
+#include "rc_led.h"
 #include "rc_read.h"
 #include "rc_usb.h"
 #include "rc_wf.h"
@@ -361,11 +362,13 @@ static bool hold_keys_ms(uint32_t ms, bool check_sa, bool check_sd)
  *        SA 长按 BOOT_KEY_HOLD_MS → 摇杆选择 (上=BLE, 下=USB)
  *        无按键                 → 纯射频
  */
-static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode, bool *bind_mode_active)
+static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode, bool *bind_mode_active,
+                             bool *wifi_mode)
 {
     *host_mode_selected = false;
     *ble_mode           = 0;
     *bind_mode_active   = false;
+    *wifi_mode          = false;
 
     // 读取初始状态并消抖
     bool sa = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
@@ -383,6 +386,7 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode, bool *
             ESP_LOGI(TAG, ">> 进入 WiFi 模式");
             rc_wifi_server_init(&joy);
             *host_mode_selected = true;
+            *wifi_mode          = true;
             return;
         }
         // 组合失败，重新读取各自状态
@@ -469,6 +473,7 @@ static void poll_auto_bind(const crsf_state_t *state, uint32_t now_ms, struct au
                 ESP_LOGI(TAG, "对频成功(链路稳定 %ums)，退出自动对频模式",
                          AUTO_BIND_LINK_STABLE_MS);
                 ctx->complete_logged = true;
+                led_set_mode(LED_MODE_CRSF_RF);
             }
         }
     }
@@ -590,11 +595,30 @@ void app_main(void)
     crsf_init(&crsf_cfg);
     vTaskDelay(pdMS_TO_TICKS(50));
 
+    /* ---- 5.5 LED 初始化 ---- */
+    led_init();
+
     /* ---- 6. 开机模式检测 ---- */
     bool    host_mode_selected = false;
+    bool    wifi_mode          = false;
     uint8_t ble_mode           = 0;
     bool    bind_mode_active   = false;
-    detect_boot_mode(&host_mode_selected, &ble_mode, &bind_mode_active);
+    detect_boot_mode(&host_mode_selected, &ble_mode, &bind_mode_active, &wifi_mode);
+
+    /* LED 反映开机模式 */
+    if (bind_mode_active) {
+        led_set_mode(LED_MODE_BIND);
+    } else if (ble_mode) {
+        led_set_mode(LED_MODE_BLE);
+    } else if (host_mode_selected) {
+        if (!wifi_mode) {
+            // USB 模式 — usb_init_mode() 已设置 LED，无需覆盖
+        } else {
+            led_set_mode(LED_MODE_WIFI);
+        }
+    } else {
+        led_set_mode(LED_MODE_CRSF_RF);
+    }
 
     /* ---- 7. 主循环 ---- */
     struct auto_bind_ctx bind = {0};
@@ -616,6 +640,9 @@ void app_main(void)
         /* --- BLE 输入更新 --- */
         if (ble_mode)
             ble_update_input(&joy);
+
+        /* --- LED 轮询 (处理 BIND 闪烁) --- */
+        led_poll();
 
         /* --- CRSF 链路同步 --- */
         if (host_mode_selected)

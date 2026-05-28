@@ -220,6 +220,18 @@
           />
         </div>
       </section>
+
+      <!-- ===== Tab: LED ===== -->
+      <section v-if="currentTab === 'led'">
+        <LedConfiguratorPanel
+          lang="en"
+          :led-config="ledConfig"
+          :connected="isConnected"
+          @set-led-color="setLedColor"
+          @request-led-config="requestLedConfig"
+          @save-led-config="saveLedConfig"
+        />
+      </section>
     </main>
 
     <!-- WebSocket -->
@@ -252,6 +264,7 @@ import ConfigChannelProps from '../components/ConfigChannelProps.vue'
 import ConfigChannelMapping from '../components/ConfigChannelMapping.vue'
 import ConfigStickMode from '../components/ConfigStickMode.vue'
 import ConfigProfiles from '../components/ConfigProfiles.vue'
+import LedConfiguratorPanel from '../components/LedConfiguratorPanel.vue'
 import ChannelBar from '../components/ChannelBar.vue'
 
 const {
@@ -271,6 +284,7 @@ const {
   profiles, loadProfileList, saveProfile, loadProfile, deleteProfile,
   renameProfile, exportConfig, importConfig,
   importSuccess, importError, exportProfile,
+  ledConfig, requestLedConfig, setLedColor, saveLedConfig,
 } = useRCState()
 
 currentLang.value = 'en'
@@ -399,7 +413,8 @@ const calT = {
 
 const navItems = computed(() => [
   { id: 'dashboard', label: 'Dashboard' },
-  { id: 'config', label: 'Config' }
+  { id: 'config', label: 'Config' },
+  { id: 'led', label: 'LED' }
 ])
 
 const configNavItems = computed(() => [

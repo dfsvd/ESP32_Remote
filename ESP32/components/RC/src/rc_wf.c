@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "rc_wf.h"
 #include "rc_usb.h"
+#include "rc_led.h"
 #include "rc_crsf.h"
 #include "logo_icon.h"
 #include "logo_horizontal.h"
@@ -639,10 +640,13 @@ static void do_nvs_save(void) {
         esp_err_t err_chmap = nvs_set_blob(my_handle, "ch_map", ch_map, sizeof(ch_map));
         esp_err_t err_stick = nvs_set_u8(my_handle, "stick_mode", stick_mode);
         esp_err_t err_btn = nvs_set_blob(my_handle, "btn_cfg", btn_cfg, sizeof(btn_cfg));
+        esp_err_t err_led = nvs_set_blob(my_handle, "led_cfg", led_get_config(),
+                                          sizeof(led_config_t));
 
         bool all_ok = (err_cal == ESP_OK && err_mode == ESP_OK && err_crsf == ESP_OK &&
                        err_epa_pos == ESP_OK && err_epa_neg == ESP_OK && err_rev == ESP_OK &&
-                       err_chmap == ESP_OK && err_stick == ESP_OK && err_btn == ESP_OK);
+                       err_chmap == ESP_OK && err_stick == ESP_OK && err_btn == ESP_OK &&
+                       err_led == ESP_OK);
 
         if (all_ok) {
             esp_err_t err_commit = nvs_commit(my_handle);
@@ -690,6 +694,17 @@ void load_settings_from_nvs() {
         nvs_get_u8(my_handle, "stick_mode", &stick_mode);
         size_t btn_size = sizeof(btn_cfg);
         nvs_get_blob(my_handle, "btn_cfg", btn_cfg, &btn_size);
+
+        // LED 配置 (兼容旧格式较小 blob)
+        led_config_t led_tmp;
+        size_t led_size = sizeof(led_tmp);
+        if (nvs_get_blob(my_handle, "led_cfg", &led_tmp, &led_size) == ESP_OK &&
+            led_size == sizeof(led_tmp)) {
+            led_apply_config(&led_tmp);
+            ESP_LOGI(TAG, "📂 从 Flash 成功加载 LED 配置");
+        } else {
+            ESP_LOGI(TAG, "🆕 未找到 LED 配置，使用默认值");
+        }
 
         if (err_cal == ESP_OK) {
             ESP_LOGI(TAG, "📂 从 Flash 成功加载校准数据！");
@@ -1226,6 +1241,42 @@ static esp_err_t ws_handler(httpd_req_t *req)
                 } else {
                     ESP_LOGW(TAG, "非法 BTN 指令: %s", text);
                 }
+            }
+
+            // ---- LED 灯效命令 ----
+            else if (strcmp(text, "LED_READ") == 0) {
+                char led_buf[384];
+                int off = 0;
+                const led_config_t *cfg = led_get_config();
+                for (int i = 0; i < LED_MODE_COUNT; i++) {
+                    const led_mode_cfg_t *m = &cfg->modes[i];
+                    off += snprintf(led_buf + off, sizeof(led_buf) - off,
+                                    "%s%d,%u,%u,%u,%u,%u,%u",
+                                    i == 0 ? "LED:" : ";",
+                                    i, m->r, m->g, m->b, m->effect, m->brightness, m->interval_ms);
+                }
+                off += snprintf(led_buf + off, sizeof(led_buf) - off, "\n");
+                ws_send_text(req, led_buf);
+            }
+            else if (strncmp(text, "LED_SET:", 8) == 0) {
+                int mode, r, g, b, eff, br, interval;
+                int n = sscanf(text + 8, "%d,%d,%d,%d,%d,%d,%d",
+                               &mode, &r, &g, &b, &eff, &br, &interval);
+                if (n == 6) interval = 500;  // 兼容旧格式
+                if (n >= 6 && mode >= 0 && mode < LED_MODE_COUNT &&
+                    r >= 0 && r <= 255 && g >= 0 && g <= 255 && b >= 0 && b <= 255 &&
+                    eff >= 0 && eff <= 3 && br >= 0 && br <= 4 &&
+                    interval >= 50 && interval <= 10000) {
+                    led_update_color((led_mode_t)mode, (uint8_t)r, (uint8_t)g, (uint8_t)b,
+                                     (led_effect_t)eff, (uint8_t)br, (uint16_t)interval);
+                    ws_send_text(req, "LED_OK\n");
+                } else {
+                    ws_send_text(req, "LED_ERR:range\n");
+                }
+            }
+            else if (strcmp(text, "LED_SAVE") == 0) {
+                request_nvs_save();
+                ws_send_text(req, "LED_SAVED\n");
             }
 
             // ---- 配置集 (Profile) 命令 ----

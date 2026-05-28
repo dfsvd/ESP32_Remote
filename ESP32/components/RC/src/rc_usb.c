@@ -1,5 +1,6 @@
 #include "rc_usb.h"
-#include "class/vendor/vendor_device.h" // 引入 Vendor 类头文件
+#include "rc_led.h"
+#include "class/vendor/vendor_device.h"
 
 static const char *TAG = "FPV_XBOX";
 
@@ -273,6 +274,8 @@ void usb_init_mode(sim_mode_t mode)
 {
     current_sim_mode = mode;
     ESP_LOGI(TAG, "USB init mode: %d", mode);
+
+    led_set_mode(mode == SIM_MODE_XBOX ? LED_MODE_USB_XBOX : LED_MODE_USB_HID);
 
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
 

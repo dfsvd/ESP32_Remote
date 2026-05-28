@@ -10,6 +10,7 @@ const STICK_MODE_2 = 2  // 美国手: Throttle on left, Pitch on right
 
 // --- WebSocket ---
 const ws = ref(null)
+const ledConfig = ref(null)  // LED 配置数组 [{r,g,b,e,brightness}, ...]
 const wsBuffer = ref('')
 const isConnected = ref(false)
 
@@ -388,6 +389,16 @@ function onCalibrationResult(results) {
       if (!parseModeLine(line)) {
         parseChannelsLine(line)
       }
+
+      // ---- LED 响应 ----
+      if (line.startsWith('LED:')) {
+        const parts = line.slice(4).trim().split(';')
+        ledConfig.value = parts.map(seg => {
+          const v = seg.split(',')
+          return { r: +v[1], g: +v[2], b: +v[3], e: +v[4], brightness: +v[5], interval: +v[6] || 500 }
+        })
+        return
+      }
     })
   }
 
@@ -504,6 +515,17 @@ function onCalibrationResult(results) {
 
   function requestCalibration() {
     ws.value?.sendData('GET_CAL')
+  }
+
+  // --- LED 灯效方法 ---
+  function requestLedConfig() {
+    ws.value?.sendData('LED_READ\n')
+  }
+  function setLedColor(mode, r, g, b, effect, brightness, interval) {
+    ws.value?.sendData(`LED_SET:${mode},${r},${g},${b},${effect},${brightness},${interval ?? 500}\n`)
+  }
+  function saveLedConfig() {
+    ws.value?.sendData('LED_SAVE\n')
   }
 
   // --- Channel Mapping Methods ---
@@ -715,6 +737,7 @@ function importConfig(jsonStr) {
     crsfMenus,
     epaData,
     revMask,
+    ledConfig,
 
     // profile state
     profiles,
@@ -738,6 +761,9 @@ function importConfig(jsonStr) {
     onCalibrationResult,
     onWsData,
     requestCalibration,
+    requestLedConfig,
+    setLedColor,
+    saveLedConfig,
     mapWriteState,
     updateChannelMapping,
     resetChannelMapping,
