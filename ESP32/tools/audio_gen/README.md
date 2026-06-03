@@ -14,7 +14,13 @@ tools/audio_gen/
 ## 依赖
 
 ```bash
-pip install edge-tts
+# 使用 whisper-venv（已包含 edge-tts）
+source /home/xinian/whisper-venv/bin/activate
+# 或：pip install edge-tts
+```
+
+系统还需要 ffmpeg：
+```bash
 sudo pacman -S ffmpeg         # Arch
 # 或 brew install ffmpeg      # macOS
 # 或 apt install ffmpeg        # Ubuntu/Debian
@@ -23,6 +29,7 @@ sudo pacman -S ffmpeg         # Arch
 ## 用法
 
 ```bash
+source /home/xinian/whisper-venv/bin/activate
 cd ESP32/
 python tools/audio_gen/tts_gen.py
 ```

@@ -1,12 +1,13 @@
-#!/usr/bin/env python3
+#!/home/xinian/whisper-venv/bin/python3
 """批量按 CSV 生成 WAV 到 ESP32/audio/.
 
-用法:
+使用方法:
+  source /home/xinian/whisper-venv/bin/activate
   cd ESP32/
-  python tools/gen_audio/gen_all.py
+  python tools/audio_gen/tts_gen.py
 
 依赖:
-  pip install edge-tts
+  使用 whisper-venv 中的 edge-tts（已安装）
   需要系统中安装 ffmpeg
 
 CSV 格式 (tools/gen_audio/audio_list.csv):

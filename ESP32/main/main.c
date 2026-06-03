@@ -389,6 +389,7 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
   // ---- 优先级 2: SD 单独按下 → 自动对频 ----
   if (sd) {
     ESP_LOGI(TAG, ">> 检测到 SD 按下，进入自动对频模式（纯射频）");
+    audio_play_wait(SOUND_RFMOD, 5000);
     *bind_mode_active = true;
     *rf_mode = true;
     return;
@@ -407,6 +408,7 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
             (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - sel_start;
         if (elapsed >= BOOT_STICK_SELECT_TIMEOUT_MS) {
           ESP_LOGI(TAG, ">> 选择超时，回退纯射频模式");
+          audio_play(SOUND_RFMOD);
           *rf_mode = true;
           break;
         }
@@ -442,6 +444,7 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
 
   // ---- 优先级 4: 默认纯射频 ----
   ESP_LOGI(TAG, ">> 开机模式: 纯射频 (无按键)");
+  audio_play_wait(SOUND_RFMOD, 5000);
   *rf_mode = true;
 }
 
