@@ -1,4 +1,5 @@
 #include "rc_ble.h"
+#include "rc_audio.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -483,6 +484,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
     s_subscribed = false;
     ble_update_ready_state();
     ESP_LOGI(TAG, "BLE connected");
+    audio_play(SOUND_BTCON);
 
     if (ble_gap_conn_find(s_conn_handle, &desc) == 0) {
       ESP_LOGI(TAG, "BLE conn encrypted=%d bonded=%d authenticated=%d",
@@ -498,6 +500,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
     s_paired = false;
     s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
     ESP_LOGI(TAG, "BLE disconnected: %d", event->disconnect.reason);
+    audio_play(SOUND_BTDCN);
     ble_start_advertising();
     return 0;
 
