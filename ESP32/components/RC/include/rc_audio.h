@@ -12,8 +12,8 @@
 
 #pragma once
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,39 +21,39 @@ extern "C" {
 
 /* ========== 提示音枚举 ========== */
 typedef enum {
-    SOUND_HELLO    = 0,   // 开机
-    SOUND_ARMED,          // 已解锁
-    SOUND_TAKEOF,         // 起飞
-    SOUND_RTH,            // 返航
-    SOUND_MODESW,         // 模式切换
-    SOUND_STBMOD,         // 稳定模式
-    SOUND_SXRAHD,         // 定高模式
-    SOUND_SXRMAN,         // 手动模式
-    SOUND_TURTON,         // 开启乌龟模式
-    SOUND_TURTOF,         // 关闭乌龟模式
-    SOUND_FPVMOD,         // FPV 模式
-    SOUND_BTMOD,          // 蓝牙模式
-    SOUND_WIFIMD,         // WiFi 模式
-    SOUND_USBMOD,         // USB 模式
-    SOUND_XBOXMOD,        // Xbox 模式
-    SOUND_WIFICON,        // WiFi 连接
-    SOUND_WIFIDCN,        // WiFi 断开
-    SOUND_BTCON,          // 蓝牙连接
-    SOUND_BTDCN,          // 蓝牙断开
-    SOUND_LOWBATT,        // 遥控器电压低
-    SOUND_LOWBAT,         // 电池电压低
-    SOUND_SIGLOW,         // 信号弱
-    SOUND_SIGCRT,         // 信号危险
-    SOUND_RSSI_ORG,       // 射频信号弱
-    SOUND_RSSI_RED,       // 射频信号危险
-    SOUND_TELEMOK,        // 回传恢复
-    SOUND_TELEMKO,        // 回传丢失
-    SOUND_SENSORKO,       // 传感器丢失
-    SOUND_MODELPWR,       // 接收机未关闭
-    SOUND_THRALERT,       // 警告:油门不在最低
-    SOUND_SWALERT,        // 警告:开关不在初始位置
-    SOUND_INACTIV,        // 长时间无操作
-    SOUND_RFMOD,          // 射频模式
+    SOUND_HELLO = 0, // 开机
+    SOUND_ARMED,     // 已解锁
+    SOUND_TAKEOF,    // 起飞
+    SOUND_RTH,       // 返航
+    SOUND_MODESW,    // 模式切换
+    SOUND_STBMOD,    // 稳定模式
+    SOUND_SXRAHD,    // 定高模式
+    SOUND_SXRMAN,    // 手动模式
+    SOUND_TURTON,    // 开启乌龟模式
+    SOUND_TURTOF,    // 关闭乌龟模式
+    SOUND_FPVMOD,    // FPV 模式
+    SOUND_BTMOD,     // 蓝牙模式
+    SOUND_WIFIMD,    // WiFi 模式
+    SOUND_USBMOD,    // USB 模式
+    SOUND_XBOXMOD,   // Xbox 模式
+    SOUND_WIFICON,   // WiFi 连接
+    SOUND_WIFIDCN,   // WiFi 断开
+    SOUND_BTCON,     // 蓝牙连接
+    SOUND_BTDCN,     // 蓝牙断开
+    SOUND_LOWBATT,   // 遥控器电压低
+    SOUND_LOWBAT,    // 电池电压低
+    SOUND_SIGLOW,    // 信号弱
+    SOUND_SIGCRT,    // 信号危险
+    SOUND_RSSI_ORG,  // 射频信号弱
+    SOUND_RSSI_RED,  // 射频信号危险
+    SOUND_TELEMOK,   // 回传恢复
+    SOUND_TELEMKO,   // 回传丢失
+    SOUND_SENSORKO,  // 传感器丢失
+    SOUND_MODELPWR,  // 接收机未关闭
+    SOUND_THRALERT,  // 警告:油门不在最低
+    SOUND_SWALERT,   // 警告:开关不在初始位置
+    SOUND_INACTIV,   // 长时间无操作
+    SOUND_RFMOD,     // 射频模式
     SOUND_COUNT,
 } sound_id_t;
 
@@ -62,17 +62,17 @@ typedef enum {
  *   优先级高的可打断正在播放的低优先级音
  */
 typedef enum {
-    AUDIO_PRIO_LOW      = 0,
-    AUDIO_PRIO_NORMAL   = 1,
-    AUDIO_PRIO_HIGH     = 2,
+    AUDIO_PRIO_LOW = 0,
+    AUDIO_PRIO_NORMAL = 1,
+    AUDIO_PRIO_HIGH = 2,
     AUDIO_PRIO_CRITICAL = 3,
 } audio_priority_t;
 
 /* ========== I2S 引脚配置 ========== */
 typedef struct {
-    int bclk_pin;       // BCLK (默认 GPIO11)
-    int lrc_pin;        // LRC/WS (默认 GPIO12)
-    int dout_pin;       // DIN (默认 GPIO13)
+    int bclk_pin; // BCLK (默认 GPIO11)
+    int lrc_pin;  // LRC/WS (默认 GPIO12)
+    int dout_pin; // DIN (默认 GPIO13)
 } audio_pins_t;
 
 /* ========== 公共 API ========== */

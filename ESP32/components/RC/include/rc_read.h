@@ -15,63 +15,63 @@ extern "C" {
 #define FRE_HZ 20000
 
 typedef struct {
-  uint16_t raw_min;
-  uint16_t raw_mid;
-  uint16_t raw_max;
+    uint16_t raw_min;
+    uint16_t raw_mid;
+    uint16_t raw_max;
 } channel_cal_t;
 
 #define MAX_PROFILES 8
 #define PROFILE_NAME_LEN 16
 
 typedef struct {
-  uint8_t ch_map[16];
-  uint8_t epa_pos[16];
-  uint8_t epa_neg[16];
-  uint16_t rev_mask;
-  uint8_t stick_mode;
-  uint8_t btn_cfg[4];
-  channel_cal_t limit[16];
+    uint8_t ch_map[16];
+    uint8_t epa_pos[16];
+    uint8_t epa_neg[16];
+    uint16_t rev_mask;
+    uint8_t stick_mode;
+    uint8_t btn_cfg[4];
+    channel_cal_t limit[16];
 } __attribute__((packed)) config_blob_t;
 
 typedef struct {
-  // ==========================================================
-  // 1. 最终输出数据 (发给 USB / 模拟器用的 16 个通道，全是 1000~2000)
-  // ==========================================================
-  // CH1 ~ CH4: 摇杆主轴
-  uint16_t roll;     // CH1
-  uint16_t pitch;    // CH2
-  uint16_t throttle; // CH3
-  uint16_t yaw;      // CH4
+    // ==========================================================
+    // 1. 最终输出数据 (发给 USB / 模拟器用的 16 个通道，全是 1000~2000)
+    // ==========================================================
+    // CH1 ~ CH4: 摇杆主轴
+    uint16_t roll;     // CH1
+    uint16_t pitch;    // CH2
+    uint16_t throttle; // CH3
+    uint16_t yaw;      // CH4
 
-  // CH5 ~ CH8: 模拟辅助通道 (滑块/旋钮)
-  uint16_t aux1; // CH5
-  uint16_t aux2; // CH6
-  uint16_t aux3; // CH7
-  uint16_t aux4; // CH8
+    // CH5 ~ CH8: 模拟辅助通道 (滑块/旋钮)
+    uint16_t aux1; // CH5
+    uint16_t aux2; // CH6
+    uint16_t aux3; // CH7
+    uint16_t aux4; // CH8
 
-  // CH9 ~ CH16: 数字开关通道 (2段/3段开关)
-  uint16_t sw1; // CH9
-  uint16_t sw2; // CH10
-  uint16_t sw3; // CH11
-  uint16_t sw4; // CH12
-  uint16_t sw5; // CH13
-  uint16_t sw6; // CH14
-  uint16_t sw7; // CH15
-  uint16_t sw8; // CH16
+    // CH9 ~ CH16: 数字开关通道 (2段/3段开关)
+    uint16_t sw1; // CH9
+    uint16_t sw2; // CH10
+    uint16_t sw3; // CH11
+    uint16_t sw4; // CH12
+    uint16_t sw5; // CH13
+    uint16_t sw6; // CH14
+    uint16_t sw7; // CH15
+    uint16_t sw8; // CH16
 
-  // ==========================================================
-  // 2. 校准专用数据 (只发给网页端，存放 0~4095 的原始 ADC 值)
-  // ==========================================================
-  // 只有前 8 个模拟通道需要物理校准
-  uint16_t raw_roll;
-  uint16_t raw_pitch;
-  uint16_t raw_throttle;
-  uint16_t raw_yaw;
+    // ==========================================================
+    // 2. 校准专用数据 (只发给网页端，存放 0~4095 的原始 ADC 值)
+    // ==========================================================
+    // 只有前 8 个模拟通道需要物理校准
+    uint16_t raw_roll;
+    uint16_t raw_pitch;
+    uint16_t raw_throttle;
+    uint16_t raw_yaw;
 
-  uint16_t raw_aux1;
-  uint16_t raw_aux2;
-  uint16_t raw_aux3;
-  uint16_t raw_aux4;
+    uint16_t raw_aux1;
+    uint16_t raw_aux2;
+    uint16_t raw_aux3;
+    uint16_t raw_aux4;
 
 } fpv_joystick_report_t;
 
@@ -92,15 +92,15 @@ typedef struct {
 #define RC_SWITCH_SD_PIN GPIO_NUM_38      // SD: 按键(自复位) → CH8
 
 #define GPIO_SW                                                                \
-  ((1ULL << RC_SWITCH_SA_PIN) | (1ULL << RC_SWITCH_SC_UP_PIN) |                \
-   (1ULL << RC_SWITCH_SC_DOWN_PIN) | (1ULL << RC_SWITCH_SD_PIN) |              \
-   (1ULL << RC_SWITCH_SB_PIN))
+    ((1ULL << RC_SWITCH_SA_PIN) | (1ULL << RC_SWITCH_SC_UP_PIN) |              \
+     (1ULL << RC_SWITCH_SC_DOWN_PIN) | (1ULL << RC_SWITCH_SD_PIN) |            \
+     (1ULL << RC_SWITCH_SB_PIN))
 
 #define READ_KEY_SA read_2pos_switch(RC_SWITCH_SA_PIN, true)  // 按键 → CH8
 #define READ_KEY_SB read_2pos_switch(RC_SWITCH_SB_PIN, false) // 2段  → CH6
 #define READ_KEY_SC                                                            \
-  read_3pos_switch(RC_SWITCH_SC_UP_PIN, RC_SWITCH_SC_DOWN_PIN) // 3段  → CH7
-#define READ_KEY_SD read_2pos_switch(RC_SWITCH_SD_PIN, true)   // 按键 → CH5
+    read_3pos_switch(RC_SWITCH_SC_UP_PIN, RC_SWITCH_SC_DOWN_PIN) // 3段  → CH7
+#define READ_KEY_SD read_2pos_switch(RC_SWITCH_SD_PIN, true)     // 按键 → CH5
 #define READ_KEY_FIXED1 1500
 #define READ_KEY_FIXED2 1500
 #define READ_KEY_FIXED3 1500
