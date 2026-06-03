@@ -53,6 +53,7 @@ static const char *TAG = "FPV_RC";
 #define BOOT_STICK_SELECT_TIMEOUT_MS 5000 // 摇杆选择超时
 #define BOOT_STICK_UP_THRESH 1300         // 右摇杆上打阈值 (<此值)
 #define BOOT_STICK_DOWN_THRESH 1700       // 右摇杆下打阈值 (>此值)
+#define BOOT_STICK_RIGHT_THRESH 1700      // 右摇杆右打阈值 (>此值)
 #define BOOT_DEBOUNCE_MS 80               // 按键消抖时间
 
 /* =========================================================================
@@ -345,15 +346,17 @@ static bool hold_keys_ms(uint32_t ms, bool check_sa, bool check_sd) {
  * @note  优先级: SA+SD > SD > SA > 默认
  *        SA+SD 长按 BOOT_KEY_HOLD_MS → WiFi
  *        SD 按下                → 自动对频 + 纯射频
- *        SA 长按 BOOT_KEY_HOLD_MS → 摇杆选择 (上=BLE, 下=USB)
+ *        SA 长按 BOOT_KEY_HOLD_MS → 摇杆选择 (上=BLE, 下=USB, 右=射频)
  *        无按键                 → 纯射频
  */
 static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
-                             bool *bind_mode_active, bool *wifi_mode) {
+                             bool *bind_mode_active, bool *wifi_mode,
+                             bool *rf_mode) {
   *host_mode_selected = false;
   *ble_mode = 0;
   *bind_mode_active = false;
   *wifi_mode = false;
+  *rf_mode = false;
 
   // 读取初始状态并消抖
   bool sa = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
@@ -373,7 +376,7 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
     if (hold_keys_ms(BOOT_KEY_HOLD_MS, true, true)) {
       ESP_LOGI(TAG, ">> 进入 WiFi 模式");
       audio_play_wait(SOUND_WIFIMD, 5000);
-      rc_wifi_server_init(&joy);
+      // WiFi WiFi 模式下，CRSF 在 detect_boot_mode 之后初始化
       *host_mode_selected = true;
       *wifi_mode = true;
       return;
@@ -387,6 +390,7 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
   if (sd) {
     ESP_LOGI(TAG, ">> 检测到 SD 按下，进入自动对频模式（纯射频）");
     *bind_mode_active = true;
+    *rf_mode = true;
     return;
   }
 
@@ -395,7 +399,7 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
     ESP_LOGI(TAG, "检测到 SA 按下，保持 %dms 进入模式选择...",
              BOOT_KEY_HOLD_MS);
     if (hold_keys_ms(BOOT_KEY_HOLD_MS, true, false)) {
-      ESP_LOGI(TAG, ">> 进入模式选择: 右摇杆上=BLE, 下=USB (超时 %dms)",
+      ESP_LOGI(TAG, ">> 进入模式选择: 右摇杆上=BLE, 下=USB, 右=射频 (超时 %dms)",
                BOOT_STICK_SELECT_TIMEOUT_MS);
       uint32_t sel_start = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
       while (1) {
@@ -403,9 +407,11 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
             (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) - sel_start;
         if (elapsed >= BOOT_STICK_SELECT_TIMEOUT_MS) {
           ESP_LOGI(TAG, ">> 选择超时，回退纯射频模式");
+          *rf_mode = true;
           break;
         }
         uint16_t pitch = joy.pitch;
+        uint16_t roll  = joy.roll;
         if (pitch < BOOT_STICK_UP_THRESH) {
           ESP_LOGI(TAG, ">> 右摇杆上 → 进入 BLE 模式");
           audio_play_wait(SOUND_BTMOD, 5000);
@@ -421,6 +427,13 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
           *host_mode_selected = true;
           return;
         }
+        if (roll > BOOT_STICK_RIGHT_THRESH) {
+          ESP_LOGI(TAG, ">> 右摇杆右 → 进入纯射频模式");
+          audio_play_wait(SOUND_RFMOD, 5000);
+          *host_mode_selected = true;
+          *rf_mode = true;
+          return;
+        }
         vTaskDelay(pdMS_TO_TICKS(100));
       }
     }
@@ -429,6 +442,7 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
 
   // ---- 优先级 4: 默认纯射频 ----
   ESP_LOGI(TAG, ">> 开机模式: 纯射频 (无按键)");
+  *rf_mode = true;
 }
 
 /* =========================================================================
@@ -555,36 +569,13 @@ void app_main(void) {
 
   /* ---- 3.5 音频播放器初始化 + 开机提示音 ---- */
   audio_init(NULL, 0); // 默认 I2S 引脚 + 16kHz
-  audio_play_wait(SOUND_HELLO, 5000);
+  audio_play(SOUND_HELLO);
 
-  /* ---- 4. CRSF 初始化 ---- */
-  crsf_config_t crsf_cfg = {
-      .uart_port = CRSF_UART_PORT,
-      .tx_pin = boot_half_duplex ? CRSF_UART_HALF_DUPLEX_PIN : CRSF_UART_TX_PIN,
-      .rx_pin = boot_half_duplex ? CRSF_UART_HALF_DUPLEX_PIN : CRSF_UART_RX_PIN,
-      .half_duplex = boot_half_duplex,
-      .invert_signal = CRSF_UART_INVERTED,
-      .task_priority = 5,
-      .task_core_id = 1,
-      .on_device_info_cb = my_crsf_device_info_callback,
-  };
-
-  if (boot_half_duplex) {
-    ESP_LOGI(TAG, "CRSF 启动链路: single-wire (%s) IO=%d inverted=%d",
-             has_saved_half_duplex ? "from NVS" : "from compile default",
-             CRSF_UART_HALF_DUPLEX_PIN, CRSF_UART_INVERTED);
-  } else {
-    ESP_LOGI(TAG, "CRSF 启动链路: dual-wire (%s) TX=%d RX=%d inverted=%d",
-             has_saved_half_duplex ? "from NVS" : "from compile default",
-             CRSF_UART_TX_PIN, CRSF_UART_RX_PIN, CRSF_UART_INVERTED);
-  }
-
-  /* ---- 5. 启动 ADC 读取任务与 CRSF 协议栈 ---- */
+  /* ---- 4. 启动 ADC (摇杆读取) — 需在 boot 检测之前 ---- */
   xTaskCreatePinnedToCore(ADC_TASK, "adc_task", 4096, &joy, 4, NULL, 1);
-  crsf_init(&crsf_cfg);
   vTaskDelay(pdMS_TO_TICKS(50));
 
-  /* ---- 5.5 LED 初始化 ---- */
+  /* ---- 5. LED 初始化 ---- */
   led_init();
 
   /* ---- 6. 开机模式检测 ---- */
@@ -592,23 +583,52 @@ void app_main(void) {
   bool wifi_mode = false;
   uint8_t ble_mode = 0;
   bool bind_mode_active = false;
+  bool rf_mode = false;
   detect_boot_mode(&host_mode_selected, &ble_mode, &bind_mode_active,
-                   &wifi_mode);
+                   &wifi_mode, &rf_mode);
+
+  /* ---- 7. 按模式选择性初始化硬件 ---- */
+  bool crsf_needed = rf_mode || wifi_mode || bind_mode_active;
+
+  if (crsf_needed) {
+    crsf_config_t crsf_cfg = {
+        .uart_port = CRSF_UART_PORT,
+        .tx_pin = boot_half_duplex ? CRSF_UART_HALF_DUPLEX_PIN : CRSF_UART_TX_PIN,
+        .rx_pin = boot_half_duplex ? CRSF_UART_HALF_DUPLEX_PIN : CRSF_UART_RX_PIN,
+        .half_duplex = boot_half_duplex,
+        .invert_signal = CRSF_UART_INVERTED,
+        .task_priority = 5,
+        .task_core_id = 1,
+        .on_device_info_cb = my_crsf_device_info_callback,
+    };
+
+    if (boot_half_duplex) {
+      ESP_LOGI(TAG, "CRSF 启动链路: single-wire (%s) IO=%d inverted=%d",
+               has_saved_half_duplex ? "from NVS" : "from compile default",
+               CRSF_UART_HALF_DUPLEX_PIN, CRSF_UART_INVERTED);
+    } else {
+      ESP_LOGI(TAG, "CRSF 启动链路: dual-wire (%s) TX=%d RX=%d inverted=%d",
+               has_saved_half_duplex ? "from NVS" : "from compile default",
+               CRSF_UART_TX_PIN, CRSF_UART_RX_PIN, CRSF_UART_INVERTED);
+    }
+    crsf_init(&crsf_cfg);
+  }
+
+  if (wifi_mode) {
+    rc_wifi_server_init(&joy);
+  }
 
   /* LED 反映开机模式 */
   if (bind_mode_active) {
     led_set_mode(LED_MODE_BIND);
   } else if (ble_mode) {
     led_set_mode(LED_MODE_BLE);
-  } else if (host_mode_selected) {
-    if (!wifi_mode) {
-      // USB 模式 — usb_init_mode() 已设置 LED，无需覆盖
-    } else {
-      led_set_mode(LED_MODE_WIFI);
-    }
-  } else {
+  } else if (wifi_mode) {
+    led_set_mode(LED_MODE_WIFI);
+  } else if (rf_mode) {
     led_set_mode(LED_MODE_CRSF_RF);
   }
+  // USB 模式 — usb_init_mode() 在 detect_boot_mode 中已设置 LED
 
   /* ---- 7. 主循环 ---- */
   struct auto_bind_ctx bind = {0};
@@ -621,10 +641,7 @@ void app_main(void) {
   // uint32_t last_joy_print = 0;
 
   while (1) {
-    crsf_state_t *state = crsf_get_state();
     uint32_t now_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
-
-    /* --- 调试输出: 每 3 秒打印一次全部通道值 --- */
 
     /* --- BLE 输入更新 --- */
     if (ble_mode)
@@ -633,59 +650,57 @@ void app_main(void) {
     /* --- LED 轮询 (处理 BIND 闪烁) --- */
     led_poll();
 
-    /* --- CRSF 链路同步 --- */
-    if (host_mode_selected) {
-      sync_joy_to_crsf(&joy);
-    } else if (state->is_linked) {
-      if (!link_ready_logged) {
-        ESP_LOGI(TAG, "高频头已连接接收机，开始发送全部通道数据");
-        link_ready_logged = true;
+    /* --- CRSF 链路同步 (仅在射频/WiFi模式下) --- */
+    if (crsf_needed) {
+      crsf_state_t *state = crsf_get_state();
+
+      if (host_mode_selected) {
+        sync_joy_to_crsf(&joy);
+      } else if (state->is_linked) {
+        if (!link_ready_logged) {
+          ESP_LOGI(TAG, "高频头已连接接收机，开始发送全部通道数据");
+          link_ready_logged = true;
+        }
+        waiting_link_logged = false;
+        sync_joy_to_crsf(&joy);
+      } else if (!waiting_link_logged) {
+        ESP_LOGI(TAG, "等待高频头连接接收机...");
+        waiting_link_logged = true;
+        link_ready_logged = false;
       }
-      waiting_link_logged = false;
-      sync_joy_to_crsf(&joy);
-    } else if (!waiting_link_logged) {
-      ESP_LOGI(TAG, "等待高频头连接接收机...");
-      waiting_link_logged = true;
-      link_ready_logged = false;
+
+      /* --- 自动对频 --- */
+      poll_auto_bind(state, now_ms, &bind);
+
+      /* --- Web 对频状态监控 --- */
+      rc_wf_poll_bind();
+
+      /* --- CRSF 菜单加载进度跟踪 --- */
+      if (state->loaded_params != last_loaded_params) {
+        last_loaded_params = state->loaded_params;
+        if (!printed_full_snapshot && state->total_params > 0 &&
+            state->loaded_params < state->total_params) {
+          ESP_LOGI(TAG, "菜单加载中: %u / %u", state->loaded_params,
+                   state->total_params);
+        }
+      }
+
+      if (state->is_ready && state->total_params > 0 &&
+          state->loaded_params == state->total_params && !printed_full_snapshot) {
+        print_crsf_state_snapshot(state);
+        printed_full_snapshot = true;
+      }
+
+      if (state->loaded_params == 0)
+        printed_full_snapshot = false;
+
+      crsf_send_device_ping();
     }
-
-    /* --- 调试输出: 每 3 秒打印一次全部通道值 --- */
-    // if (now_ms - last_joy_print >= 3000)
-    // {
-    //     last_joy_print = now_ms;
-    //     print_joystick_snapshot(&joy);
-    // }
-
-    /* --- 自动对频 --- */
-    poll_auto_bind(state, now_ms, &bind);
-
-    /* --- Web 对频状态监控 --- */
-    rc_wf_poll_bind();
 
     /* --- USB HID 数据发送 --- */
     if (tud_mounted())
       app_send_fpv_data(&joy);
 
-    /* --- CRSF 菜单加载进度跟踪 --- */
-    if (state->loaded_params != last_loaded_params) {
-      last_loaded_params = state->loaded_params;
-      if (!printed_full_snapshot && state->total_params > 0 &&
-          state->loaded_params < state->total_params) {
-        ESP_LOGI(TAG, "菜单加载中: %u / %u", state->loaded_params,
-                 state->total_params);
-      }
-    }
-
-    if (state->is_ready && state->total_params > 0 &&
-        state->loaded_params == state->total_params && !printed_full_snapshot) {
-      print_crsf_state_snapshot(state);
-      printed_full_snapshot = true;
-    }
-
-    if (state->loaded_params == 0)
-      printed_full_snapshot = false;
-
-    crsf_send_device_ping();
     vTaskDelay(1);
   }
 }

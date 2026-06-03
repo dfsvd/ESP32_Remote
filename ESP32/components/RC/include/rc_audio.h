@@ -53,6 +53,7 @@ typedef enum {
     SOUND_THRALERT,       // 警告:油门不在最低
     SOUND_SWALERT,        // 警告:开关不在初始位置
     SOUND_INACTIV,        // 长时间无操作
+    SOUND_RFMOD,          // 射频模式
     SOUND_COUNT,
 } sound_id_t;
 

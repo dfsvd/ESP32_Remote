@@ -130,6 +130,7 @@ SOUND_DECL(modelpwr);
 SOUND_DECL(thralert);
 SOUND_DECL(swalert);
 SOUND_DECL(inactiv);
+SOUND_DECL(rfmod);
 
 /* ================================================================
  * 音频数据查找表
@@ -179,6 +180,7 @@ static const sound_data_t s_sounds[SOUND_COUNT] = {
     SOUND_ENTRY(SOUND_THRALERT, thralert),
     SOUND_ENTRY(SOUND_SWALERT, swalert),
     SOUND_ENTRY(SOUND_INACTIV, inactiv),
+    SOUND_ENTRY(SOUND_RFMOD, rfmod),
 };
 
 #undef SOUND_ENTRY
@@ -223,6 +225,7 @@ static const char *s_names[] = {
     [SOUND_TELEMKO] = "telemko",   [SOUND_SENSORKO] = "sensorko",
     [SOUND_MODELPWR] = "modelpwr", [SOUND_THRALERT] = "thralert",
     [SOUND_SWALERT] = "swalert",   [SOUND_INACTIV] = "inactiv",
+    [SOUND_RFMOD] = "rfmod",
 };
 
 static const char *s_names_cn[] = {
@@ -258,6 +261,7 @@ static const char *s_names_cn[] = {
     [SOUND_THRALERT] = "油门不在最低",
     [SOUND_SWALERT] = "开关不在初始位置",
     [SOUND_INACTIV] = "长时间无操作",
+    [SOUND_RFMOD] = "射频模式",
 };
 
 /* ================================================================

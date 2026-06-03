@@ -31,3 +31,4 @@ btcon.wav,蓝牙连接,Bluetooth connected
 btdcn.wav,蓝牙断开,Bluetooth disconnected
 xboxmod.wav,xbox 模式,Xbox mode
 fpvmod.wav,fpv 模式,FPV mode
+rfmod.wav,射频模式,RF mode
