@@ -3,12 +3,25 @@ CompileFlags:
     -mlongcalls,
     -fno-shrink-wrap,
     -fstrict-volatile-bitfields,
-    -fno-tree-switch-conversion
+    -fno-tree-switch-conversion,
+    -fno-jump-tables,
+    -fno-builtin-memcpy,
+    -fno-builtin-memset,
+    -fno-builtin-bzero,
   ]
-  Add: [-resource-dir=/home/xinian/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20251107/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/14.2.0]
+  Add:
+    [
+      --target=xtensa-esp32s3-elf,
+      -resource-dir=/home/xinian/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/14.2.0,
+      -isystem,
+      /home/xinian/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/xtensa-esp-elf/sys-include,
+      -isystem,
+      /home/xinian/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/xtensa-esp-elf/include,
+    ]
 
 Diagnostics:
   Suppress: [
     -Werror,
-    -Wunused-lambda-capture
+    -Wunused-lambda-capture,
+    unused-includes,
   ]
