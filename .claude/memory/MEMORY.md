@@ -1,0 +1,1 @@
+- [hardware-specs](hardware-specs.md) — 硬件存储器规格（16MB Flash + 8MB PSRAM）
