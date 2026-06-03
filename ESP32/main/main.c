@@ -372,7 +372,7 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
              BOOT_KEY_HOLD_MS);
     if (hold_keys_ms(BOOT_KEY_HOLD_MS, true, true)) {
       ESP_LOGI(TAG, ">> 进入 WiFi 模式");
-      audio_play(SOUND_WIFIMD);
+      audio_play_wait(SOUND_WIFIMD, 5000);
       rc_wifi_server_init(&joy);
       *host_mode_selected = true;
       *wifi_mode = true;
@@ -408,7 +408,7 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
         uint16_t pitch = joy.pitch;
         if (pitch < BOOT_STICK_UP_THRESH) {
           ESP_LOGI(TAG, ">> 右摇杆上 → 进入 BLE 模式");
-          audio_play(SOUND_BTMOD);
+          audio_play_wait(SOUND_BTMOD, 5000);
           ble_init(&joy);
           *host_mode_selected = true;
           *ble_mode = 1;
@@ -416,7 +416,7 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
         }
         if (pitch > BOOT_STICK_DOWN_THRESH) {
           ESP_LOGI(TAG, ">> 右摇杆下 → 进入 USB 模式");
-          audio_play(SOUND_USBMOD);
+          audio_play_wait(SOUND_USBMOD, 5000);
           usb_init();
           *host_mode_selected = true;
           return;
@@ -555,7 +555,7 @@ void app_main(void) {
 
   /* ---- 3.5 音频播放器初始化 + 开机提示音 ---- */
   audio_init(NULL, 0); // 默认 I2S 引脚 + 16kHz
-  audio_play(SOUND_HELLO);
+  audio_play_wait(SOUND_HELLO, 5000);
 
   /* ---- 4. CRSF 初始化 ---- */
   crsf_config_t crsf_cfg = {

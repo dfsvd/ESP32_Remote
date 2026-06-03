@@ -110,6 +110,15 @@ bool audio_is_playing(void);
 void audio_stop(void);
 
 /**
+ * @brief 阻塞播放提示音，等待播放完成后再返回
+ * @param id       提示音 ID
+ * @param ms_timeout 超时时间 (ms)，0 = 无限等待
+ * @return true = 正常播完, false = 超时
+ * @note 内部使用信号量同步，适合需要确保语音播完再继续的场景
+ */
+bool audio_play_wait(sound_id_t id, uint32_t ms_timeout);
+
+/**
  * @brief 获取提示音中文名称
  */
 const char *audio_sound_name_cn(sound_id_t id);
