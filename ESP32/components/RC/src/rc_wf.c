@@ -12,6 +12,7 @@
 #include "rc_crsf.h"
 #include "rc_led.h"
 #include "rc_usb.h"
+#include "rc_audio.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -1570,6 +1571,25 @@ static void start_webserver(fpv_joystick_report_t *joy) {
 // =================================================================================
 // 初始化 WiFi SoftAP (热点) 并拉起服务器
 // =================================================================================
+// ---- WiFi 连接状态语音 ----
+static void wifi_event_handler(void *arg, esp_event_base_t event_base,
+                                int32_t event_id, void *event_data) {
+    if (event_base == WIFI_EVENT) {
+        switch (event_id) {
+        case WIFI_EVENT_AP_STACONNECTED:
+            ESP_LOGI(TAG, "WiFi station connected");
+            audio_play(SOUND_WIFICON);
+            break;
+        case WIFI_EVENT_AP_STADISCONNECTED:
+            ESP_LOGI(TAG, "WiFi station disconnected");
+            audio_play(SOUND_WIFIDCN);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
 void rc_wifi_server_init(fpv_joystick_report_t *joy) {
     // ⭐ 在启动 WiFi 之前，先去 Flash 里捞一下保存过的数据
 
@@ -1579,6 +1599,10 @@ void rc_wifi_server_init(fpv_joystick_report_t *joy) {
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    // 注册 WiFi 事件 — 连接/断开语音提示
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                                &wifi_event_handler, NULL));
 
     wifi_config_t wifi_config = {
         .ap = {.ssid = "DARWINFPV_WIFI",
