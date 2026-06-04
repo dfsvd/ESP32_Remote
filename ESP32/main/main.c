@@ -34,7 +34,6 @@
 
 static const char *TAG = "FPV_RC";
 
-#define APP_BUTTON (GPIO_NUM_0)
 #define CRSF_LINK_MODE_UART_FULL_DUPLEX 0
 #define CRSF_LINK_MODE_UART_HALF_DUPLEX 1
 #define CRSF_LINK_MODE CRSF_LINK_MODE_UART_FULL_DUPLEX
@@ -55,6 +54,37 @@ static const char *TAG = "FPV_RC";
 #define BOOT_STICK_DOWN_THRESH 1700       // 右摇杆下打阈值 (>此值)
 #define BOOT_STICK_RIGHT_THRESH 1700      // 右摇杆右打阈值 (>此值)
 #define BOOT_DEBOUNCE_MS 80               // 按键消抖时间
+
+/* =========================================================================
+ * 开机模式枚举
+ * ========================================================================= */
+typedef enum {
+    BOOT_MODE_RF = 0,        // 纯射频（默认兜底）
+    BOOT_MODE_RF_BIND,       // 射频 + 自动对频
+    BOOT_MODE_USB_FPV,       // USB 标准 HID 手柄
+    BOOT_MODE_USB_XBOX,      // USB Xbox 360 手柄
+    BOOT_MODE_BLE_FPV,       // 蓝牙 FPV HID 手柄
+    BOOT_MODE_WIFI,          // WiFi AP + WebSocket
+    BOOT_MODE_UNKNOWN = -1,  // 用户未做选择
+} boot_mode_t;
+
+static const char *boot_mode_name(boot_mode_t m) {
+    switch (m) {
+    case BOOT_MODE_RF:       return "纯射频";
+    case BOOT_MODE_RF_BIND:  return "射频+自动对频";
+    case BOOT_MODE_USB_FPV:  return "USB FPV";
+    case BOOT_MODE_USB_XBOX: return "USB Xbox";
+    case BOOT_MODE_BLE_FPV:  return "蓝牙 FPV";
+    case BOOT_MODE_WIFI:     return "WiFi AP";
+    default:                 return "未知";
+    }
+}
+
+static boot_mode_t get_default_mode(void) {
+    // TODO: 将来从 NVS 读取上次保存的模式
+    // return nvs_read_boot_mode(BOOT_MODE_RF);
+    return BOOT_MODE_RF;
+}
 
 /* =========================================================================
  * 全局状态
@@ -346,22 +376,20 @@ static bool hold_keys_ms(uint32_t ms, bool check_sa, bool check_sd) {
 }
 
 /**
- * @brief 开机模式检测 — 按键 + 摇杆交互
- * @note  优先级: SA+SD > SD > SA > 默认
- *        SA+SD 长按 BOOT_KEY_HOLD_MS → WiFi
- *        SD 按下                → 自动对频 + 纯射频
- *        SA 长按 BOOT_KEY_HOLD_MS → 摇杆选择 (上=BLE, 下=USB, 右=射频)
- *        无按键                 → 纯射频
+ * @brief 开机模式检测 — 只读 GPIO，不做任何初始化
+ *
+ * 决策树：
+ *   SD 按下           → BOOT_MODE_RF_BIND（无视其他）
+ *   SA 长按 3s        → 进入摇杆选择器:
+ *                         上=USB_FPV, 下=BLE_FPV, 右=RF
+ *                         SD 按下 → WIFI
+ *                         超时 5s → UNKNOWN（调用方 fallback）
+ *   SA 短按（<3s）    → UNKNOWN
+ *   无操作            → UNKNOWN
+ *
+ * @return 用户主动选择的模式，或 BOOT_MODE_UNKNOWN（意味着调用方 fallback 到上次保存的模式）
  */
-static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
-                             bool *bind_mode_active, bool *wifi_mode,
-                             bool *rf_mode) {
-    *host_mode_selected = false;
-    *ble_mode = 0;
-    *bind_mode_active = false;
-    *wifi_mode = false;
-    *rf_mode = false;
-
+static boot_mode_t detect_boot_mode(void) {
     // 读取初始状态并消抖
     bool sa = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
     bool sd = (gpio_get_level(RC_SWITCH_SD_PIN) == 0);
@@ -373,40 +401,22 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
             sd = (gpio_get_level(RC_SWITCH_SD_PIN) == 0);
     }
 
-    // ---- 优先级 1: SA+SD 同时长按 → WiFi ----
-    if (sa && sd) {
-        ESP_LOGI(TAG, "检测到 SA+SD 同时按下，保持 %dms 进入 WiFi 模式...",
-                 BOOT_KEY_HOLD_MS);
-        if (hold_keys_ms(BOOT_KEY_HOLD_MS, true, true)) {
-            ESP_LOGI(TAG, ">> 进入 WiFi 模式");
-            audio_play_wait(SOUND_WIFIMD, 5000);
-            // WiFi WiFi 模式下，CRSF 在 detect_boot_mode 之后初始化
-            *host_mode_selected = true;
-            *wifi_mode = true;
-            return;
-        }
-        // 组合失败，重新读取各自状态
-        sa = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
-        sd = (gpio_get_level(RC_SWITCH_SD_PIN) == 0);
-    }
-
-    // ---- 优先级 2: SD 单独按下 → 自动对频 ----
+    // ---- 优先级 1: SD 按下 → 自动对频 ----
     if (sd) {
         ESP_LOGI(TAG, ">> 检测到 SD 按下，进入自动对频模式（纯射频）");
         audio_play_wait(SOUND_RFMOD, 5000);
-        *bind_mode_active = true;
-        *rf_mode = true;
-        return;
+        return BOOT_MODE_RF_BIND;
     }
 
-    // ---- 优先级 3: SA 单独长按 → 摇杆选择 ----
+    // ---- 优先级 2: SA 长按 → 摇杆选择 ----
     if (sa) {
         ESP_LOGI(TAG, "检测到 SA 按下，保持 %dms 进入模式选择...",
                  BOOT_KEY_HOLD_MS);
         if (hold_keys_ms(BOOT_KEY_HOLD_MS, true, false)) {
+            audio_play(SOUND_MODESW);
             ESP_LOGI(
                 TAG,
-                ">> 进入模式选择: 右摇杆上=BLE, 下=USB, 右=射频 (超时 %dms)",
+                ">> 进入模式选择: 上=USB, 下=BLE, 右=RF, SD=WiFi (超时 %dms)",
                 BOOT_STICK_SELECT_TIMEOUT_MS);
             uint32_t sel_start =
                 (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
@@ -415,45 +425,46 @@ static void detect_boot_mode(bool *host_mode_selected, uint8_t *ble_mode,
                     (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS) -
                     sel_start;
                 if (elapsed >= BOOT_STICK_SELECT_TIMEOUT_MS) {
-                    ESP_LOGI(TAG, ">> 选择超时，回退纯射频模式");
+                    ESP_LOGI(TAG, ">> 选择超时，回退上次模式");
                     audio_play(SOUND_RFMOD);
-                    *rf_mode = true;
-                    break;
+                    return BOOT_MODE_UNKNOWN;
                 }
+
+                // SD 按下 → WiFi
+                if (gpio_get_level(RC_SWITCH_SD_PIN) == 0) {
+                    ESP_LOGI(TAG, ">> SD 按下 → 进入 WiFi 模式");
+                    audio_play_wait(SOUND_WIFIMD, 5000);
+                    return BOOT_MODE_WIFI;
+                }
+
                 uint16_t pitch = joy.pitch;
                 uint16_t roll = joy.roll;
                 if (pitch < BOOT_STICK_UP_THRESH) {
-                    ESP_LOGI(TAG, ">> 右摇杆上 → 进入 BLE 模式");
-                    audio_play_wait(SOUND_BTMOD, 5000);
-                    ble_init(&joy);
-                    *host_mode_selected = true;
-                    *ble_mode = 1;
-                    return;
+                    ESP_LOGI(TAG, ">> 右摇杆上 → 进入 USB 模式");
+                    audio_play_wait(SOUND_USBMOD, 5000);
+                    // TODO: 可在此二次选择 FPV 还是 Xbox
+                    return BOOT_MODE_USB_XBOX;
                 }
                 if (pitch > BOOT_STICK_DOWN_THRESH) {
-                    ESP_LOGI(TAG, ">> 右摇杆下 → 进入 USB 模式");
-                    audio_play_wait(SOUND_USBMOD, 5000);
-                    usb_init();
-                    *host_mode_selected = true;
-                    return;
+                    ESP_LOGI(TAG, ">> 右摇杆下 → 进入 BLE 模式");
+                    audio_play_wait(SOUND_BTMOD, 5000);
+                    return BOOT_MODE_BLE_FPV;
                 }
                 if (roll > BOOT_STICK_RIGHT_THRESH) {
                     ESP_LOGI(TAG, ">> 右摇杆右 → 进入纯射频模式");
                     audio_play_wait(SOUND_RFMOD, 5000);
-                    *host_mode_selected = true;
-                    *rf_mode = true;
-                    return;
+                    return BOOT_MODE_RF;
                 }
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
         }
-        return;
+        // SA 短按（未保持 3s）→ 未做选择
+        ESP_LOGI(TAG, "SA 按钮未保持 %dms，回退上次模式", BOOT_KEY_HOLD_MS);
+        return BOOT_MODE_UNKNOWN;
     }
 
-    // ---- 优先级 4: 默认纯射频 ----
-    ESP_LOGI(TAG, ">> 开机模式: 纯射频 (无按键)");
-    audio_play_wait(SOUND_RFMOD, 5000);
-    *rf_mode = true;
+    // ---- 无按键 → 未做选择 ----
+    return BOOT_MODE_UNKNOWN;
 }
 
 /* =========================================================================
@@ -559,13 +570,6 @@ void app_main(void) {
             : (CRSF_LINK_MODE == CRSF_LINK_MODE_UART_HALF_DUPLEX);
 
     /* ---- 3. GPIO 配置 ---- */
-    const gpio_config_t boot_button_config = {
-        .pin_bit_mask = BIT64(APP_BUTTON),
-        .mode = GPIO_MODE_INPUT,
-        .intr_type = GPIO_INTR_DISABLE,
-        .pull_up_en = true,
-        .pull_down_en = false,
-    };
     const gpio_config_t mode_select_config = {
         .pin_bit_mask =
             (1ULL << RC_SWITCH_SA_PIN) | (1ULL << RC_SWITCH_SD_PIN) |
@@ -575,7 +579,6 @@ void app_main(void) {
         .pull_up_en = true,
         .pull_down_en = false,
     };
-    ESP_ERROR_CHECK(gpio_config(&boot_button_config));
     ESP_ERROR_CHECK(gpio_config(&mode_select_config));
 
     /* ---- 3.5 音频播放器初始化 + 开机提示音 ---- */
@@ -590,16 +593,22 @@ void app_main(void) {
     led_init();
 
     /* ---- 6. 开机模式检测 ---- */
-    bool host_mode_selected = false;
-    bool wifi_mode = false;
-    uint8_t ble_mode = 0;
-    bool bind_mode_active = false;
-    bool rf_mode = false;
-    detect_boot_mode(&host_mode_selected, &ble_mode, &bind_mode_active,
-                     &wifi_mode, &rf_mode);
+    boot_mode_t mode = detect_boot_mode();
+    if (mode == BOOT_MODE_UNKNOWN) {
+        mode = get_default_mode();
+        ESP_LOGI(TAG, ">> 用户未主动选择，使用默认模式: %s",
+                 boot_mode_name(mode));
+    } else {
+        ESP_LOGI(TAG, ">> 开机模式: %s", boot_mode_name(mode));
+    }
 
     /* ---- 7. 按模式选择性初始化硬件 ---- */
-    bool crsf_needed = rf_mode || wifi_mode || bind_mode_active;
+    const bool crsf_needed = (mode == BOOT_MODE_RF ||
+                              mode == BOOT_MODE_RF_BIND ||
+                              mode == BOOT_MODE_WIFI);
+    const bool crsf_always_sync = (mode == BOOT_MODE_WIFI);
+    const bool auto_bind = (mode == BOOT_MODE_RF_BIND);
+    const bool use_ble = (mode == BOOT_MODE_BLE_FPV);
 
     if (crsf_needed) {
         crsf_config_t crsf_cfg = {
@@ -629,47 +638,68 @@ void app_main(void) {
         crsf_init(&crsf_cfg);
     }
 
-    if (wifi_mode) {
+    if (mode == BOOT_MODE_WIFI) {
         rc_wifi_server_init(&joy);
     }
 
-    /* LED 反映开机模式 */
-    if (bind_mode_active) {
-        led_set_mode(LED_MODE_BIND);
-    } else if (ble_mode) {
-        led_set_mode(LED_MODE_BLE);
-    } else if (wifi_mode) {
-        led_set_mode(LED_MODE_WIFI);
-    } else if (rf_mode) {
-        led_set_mode(LED_MODE_CRSF_RF);
+    if (use_ble) {
+        // BLE 初始化使用 joy 指针，必须先于主循环
+        ble_init(&joy);
     }
-    // USB 模式 — usb_init_mode() 在 detect_boot_mode 中已设置 LED
 
-    /* ---- 7. 主循环 ---- */
+    if (mode == BOOT_MODE_USB_XBOX) {
+        usb_init_mode(SIM_MODE_XBOX);
+    } else if (mode == BOOT_MODE_USB_FPV) {
+        usb_init_mode(SIM_MODE_DEFAULT);
+    }
+
+    /* LED 反映开机模式 */
+    switch (mode) {
+    case BOOT_MODE_RF_BIND:
+        led_set_mode(LED_MODE_BIND);
+        break;
+    case BOOT_MODE_BLE_FPV:
+        led_set_mode(LED_MODE_BLE);
+        break;
+    case BOOT_MODE_WIFI:
+        led_set_mode(LED_MODE_WIFI);
+        break;
+    case BOOT_MODE_USB_XBOX:
+        led_set_mode(LED_MODE_USB_XBOX);
+        break;
+    case BOOT_MODE_USB_FPV:
+        led_set_mode(LED_MODE_USB_HID);
+        break;
+    case BOOT_MODE_RF:
+    default:
+        led_set_mode(LED_MODE_CRSF_RF);
+        break;
+    }
+
+    /* ---- 8. 主循环 ---- */
     struct auto_bind_ctx bind = {0};
-    bind.active = bind_mode_active;
+    bind.active = auto_bind;
 
     bool printed_full_snapshot = false;
     bool waiting_link_logged = false;
     bool link_ready_logged = false;
     uint8_t last_loaded_params = 0;
-    // uint32_t last_joy_print = 0;
 
     while (1) {
         uint32_t now_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
 
         /* --- BLE 输入更新 --- */
-        if (ble_mode)
+        if (use_ble)
             ble_update_input(&joy);
 
         /* --- LED 轮询 (处理 BIND 闪烁) --- */
         led_poll();
 
-        /* --- CRSF 链路同步 (仅在射频/WiFi模式下) --- */
+        /* --- CRSF 链路同步 --- */
         if (crsf_needed) {
             crsf_state_t *state = crsf_get_state();
 
-            if (host_mode_selected) {
+            if (crsf_always_sync) {
                 sync_joy_to_crsf(&joy);
             } else if (state->is_linked) {
                 if (!link_ready_logged) {
