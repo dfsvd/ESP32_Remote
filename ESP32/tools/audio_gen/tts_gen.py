@@ -17,6 +17,7 @@ CSV 格式 (tools/gen_audio/audio_list.csv):
 """
 import asyncio
 import csv
+import edge_tts
 import subprocess
 import sys
 from pathlib import Path
@@ -70,7 +71,17 @@ async def main():
         reader = csv.DictReader(f)
         for r in reader:
             rows.append((r["filename"], r["zh-CN"]))
+    wanted = {fn for fn, _ in rows}
     print(f"待生成: {len(rows)} 条 → {OUT_DIR}")
+
+    # 删除输出目录中不在 CSV 列表里的历史 wav 文件
+    removed = 0
+    for f in OUT_DIR.iterdir():
+        if f.suffix == ".wav" and f.name not in wanted:
+            f.unlink()
+            removed += 1
+    if removed:
+        print(f"已删除 {removed} 个废弃音频文件")
 
     sem = asyncio.Semaphore(CONCURRENCY)
     tasks = [synth_one(sem, txt, OUT_DIR / fn) for fn, txt in rows]
