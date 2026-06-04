@@ -1,1 +1,2 @@
 - [hardware-specs](hardware-specs.md) — 硬件存储器规格（16MB Flash + 8MB PSRAM）
+- [project-status](project-status.md) — 项目当前状态：架构、接线、模式选择、音频系统、已知问题
