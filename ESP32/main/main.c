@@ -46,6 +46,7 @@ static const char *TAG = "FPV_RC";
 #define FALLBACK_BIND_PARAM_ID 18
 #define AUTO_BIND_INTERVAL_MS 2000U
 #define AUTO_BIND_LINK_STABLE_MS 1200U
+#define BIND_TIMEOUT_MS 30000U        // 连接接收机超时
 
 // ---- 开机模式切换 ----
 #define BOOT_KEY_HOLD_MS 3000             // 按键长按判定时间
@@ -60,7 +61,6 @@ static const char *TAG = "FPV_RC";
  * ========================================================================= */
 typedef enum {
     BOOT_MODE_RF = 0,        // 纯射频（默认兜底）
-    BOOT_MODE_RF_BIND,       // 射频 + 自动对频
     BOOT_MODE_USB_FPV,       // USB 标准 HID 手柄
     BOOT_MODE_USB_XBOX,      // USB Xbox 360 手柄
     BOOT_MODE_BLE_FPV,       // 蓝牙 FPV HID 手柄
@@ -71,7 +71,6 @@ typedef enum {
 static const char *boot_mode_name(boot_mode_t m) {
     switch (m) {
     case BOOT_MODE_RF:       return "纯射频";
-    case BOOT_MODE_RF_BIND:  return "射频+自动对频";
     case BOOT_MODE_USB_FPV:  return "USB FPV";
     case BOOT_MODE_USB_XBOX: return "USB Xbox";
     case BOOT_MODE_BLE_FPV:  return "蓝牙 FPV";
@@ -379,7 +378,6 @@ static bool hold_keys_ms(uint32_t ms, bool check_sa, bool check_sd) {
  * @brief 开机模式检测 — 只读 GPIO，不做任何初始化
  *
  * 决策树：
- *   SD 按下           → BOOT_MODE_RF_BIND（无视其他）
  *   SA 长按 3s        → 进入摇杆选择器:
  *                         上=USB_FPV, 下=BLE_FPV, 右=RF
  *                         SD 按下 → WIFI
@@ -387,28 +385,15 @@ static bool hold_keys_ms(uint32_t ms, bool check_sa, bool check_sd) {
  *   SA 短按（<3s）    → UNKNOWN
  *   无操作            → UNKNOWN
  *
- * @return 用户主动选择的模式，或 BOOT_MODE_UNKNOWN（意味着调用方 fallback 到上次保存的模式）
+ * @return 用户主动选择的模式，或 BOOT_MODE_UNKNOWN（调用方 fallback 到上次保存的模式）
  */
 static boot_mode_t detect_boot_mode(void) {
     // 读取初始状态并消抖
     bool sa = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
-    bool sd = (gpio_get_level(RC_SWITCH_SD_PIN) == 0);
-    if (sa || sd) {
+    if (sa)
         vTaskDelay(pdMS_TO_TICKS(BOOT_DEBOUNCE_MS));
-        if (sa)
-            sa = (gpio_get_level(RC_SWITCH_SA_PIN) == 0);
-        if (sd)
-            sd = (gpio_get_level(RC_SWITCH_SD_PIN) == 0);
-    }
 
-    // ---- 优先级 1: SD 按下 → 自动对频 ----
-    if (sd) {
-        ESP_LOGI(TAG, ">> 检测到 SD 按下，进入自动对频模式（纯射频）");
-        audio_play_wait(SOUND_RFMOD, 5000);
-        return BOOT_MODE_RF_BIND;
-    }
-
-    // ---- 优先级 2: SA 长按 → 摇杆选择 ----
+    // ---- SA 长按 → 摇杆选择 ----
     if (sa) {
         ESP_LOGI(TAG, "检测到 SA 按下，保持 %dms 进入模式选择...",
                  BOOT_KEY_HOLD_MS);
@@ -604,10 +589,8 @@ void app_main(void) {
 
     /* ---- 7. 按模式选择性初始化硬件 ---- */
     const bool crsf_needed = (mode == BOOT_MODE_RF ||
-                              mode == BOOT_MODE_RF_BIND ||
                               mode == BOOT_MODE_WIFI);
     const bool crsf_always_sync = (mode == BOOT_MODE_WIFI);
-    const bool auto_bind = (mode == BOOT_MODE_RF_BIND);
     const bool use_ble = (mode == BOOT_MODE_BLE_FPV);
 
     if (crsf_needed) {
@@ -655,9 +638,6 @@ void app_main(void) {
 
     /* LED 反映开机模式 */
     switch (mode) {
-    case BOOT_MODE_RF_BIND:
-        led_set_mode(LED_MODE_BIND);
-        break;
     case BOOT_MODE_BLE_FPV:
         led_set_mode(LED_MODE_BLE);
         break;
@@ -666,23 +646,45 @@ void app_main(void) {
         break;
     case BOOT_MODE_USB_XBOX:
         led_set_mode(LED_MODE_USB_XBOX);
+        audio_play(SOUND_XBOXMOD);
         break;
     case BOOT_MODE_USB_FPV:
         led_set_mode(LED_MODE_USB_HID);
+        audio_play(SOUND_FPVMOD);
         break;
     case BOOT_MODE_RF:
     default:
         led_set_mode(LED_MODE_CRSF_RF);
+        // 射频模式启动时即检测安全条件，不等链路上线
+        // throttle: 校准最低值允许 ±6% 噪声容差
+        if (joy.throttle > 1060) {
+            ESP_LOGI(TAG, "油门不在最低，播放警告");
+            audio_play_wait(SOUND_THRALERT, 5000);
+        }
+        // SB (2段拨码, aux2/CH6): 不在关位 → 警告
+        if (joy.aux2 > 1500) {
+            ESP_LOGI(TAG, "解锁开关不在初始位置，播放警告");
+            audio_play_wait(SOUND_SWALERT, 5000);
+        }
+        // SC (3段拨码, aux3/CH7): 不在下位(1000) → 警告
+        if (joy.aux3 != 1000) {
+            ESP_LOGI(TAG, "三段开关不在初始位置，播放警告");
+            audio_play_wait(SOUND_SWALERT, 5000);
+        }
         break;
     }
 
     /* ---- 8. 主循环 ---- */
     struct auto_bind_ctx bind = {0};
-    bind.active = auto_bind;
+
+    bool prev_linked = false;
+    bool prev_sb_state = false;   // SB 解锁开关上一个状态 (false=锁)
+    bool bind_pending = false;     // 正在连接中
+    uint32_t bind_start_ms = 0;    // 开始连接的时间戳
+    bool bind_retry_played = false;
+    uint32_t last_rssi_warn_ms = 0;
 
     bool printed_full_snapshot = false;
-    bool waiting_link_logged = false;
-    bool link_ready_logged = false;
     uint8_t last_loaded_params = 0;
 
     while (1) {
@@ -699,28 +701,90 @@ void app_main(void) {
         if (crsf_needed) {
             crsf_state_t *state = crsf_get_state();
 
-            if (crsf_always_sync) {
-                sync_joy_to_crsf(&joy);
-            } else if (state->is_linked) {
-                if (!link_ready_logged) {
-                    ESP_LOGI(TAG, "高频头已连接接收机，开始发送全部通道数据");
-                    link_ready_logged = true;
+            const bool linked = state->is_linked;
+
+            /* ---- SD 连接按钮（仅在非 WiFi 模式下） ---- */
+            if (!crsf_always_sync) {
+                if (!linked && !bind_pending) {
+                    // 未连接 + 未在绑定中 → SD 作为连接按钮
+                    if (gpio_get_level(RC_SWITCH_SD_PIN) == 0) {
+                        ESP_LOGI(TAG, ">> SD 按下，开始连接接收机");
+                        audio_play(SOUND_BINDING);
+                        uint8_t bind_param = find_bind_param_id(state);
+                        if (bind_param == 0)
+                            bind_param = FALLBACK_BIND_PARAM_ID;
+                        crsf_write_menu_value(bind_param, 1);
+                        bind_pending = true;
+                        bind_start_ms = now_ms;
+                        bind_retry_played = false;
+                        led_set_mode(LED_MODE_BIND);
+                    }
                 }
-                waiting_link_logged = false;
-                sync_joy_to_crsf(&joy);
-            } else if (!waiting_link_logged) {
-                ESP_LOGI(TAG, "等待高频头连接接收机...");
-                waiting_link_logged = true;
-                link_ready_logged = false;
+
+                if (bind_pending) {
+                    if (linked) {
+                        // 连接成功
+                        bind_pending = false;
+                        audio_play(SOUND_BINDDONE);
+                        led_set_mode(LED_MODE_CRSF_RF);
+                        ESP_LOGI(TAG, "连接成功");
+                    } else if (now_ms - bind_start_ms >= BIND_TIMEOUT_MS) {
+                        // 超时
+                        bind_pending = false;
+                        audio_play(SOUND_BINDFAIL);
+                        led_set_mode(LED_MODE_CRSF_RF);
+                        ESP_LOGW(TAG, "连接超时（%ums）", BIND_TIMEOUT_MS);
+                    } else if (!bind_retry_played &&
+                               now_ms - bind_start_ms >= 5000) {
+                        bind_retry_played = true;
+                        // 5s还没连上，重新尝试一次
+                    }
+                }
             }
 
-            /* --- 自动对频 --- */
-            poll_auto_bind(state, now_ms, &bind);
+            /* ---- 回传状态语音（跟踪 is_linked 变化） ---- */
+            if (linked != prev_linked) {
+                prev_linked = linked;
+                if (linked) {
+                    audio_play(SOUND_TELEMOK);
+                } else if (!bind_pending) {
+                    // 不是正在尝试连接断开 → 播已断开
+                    audio_play(SOUND_TELEMKO);
+                    audio_play(SOUND_DISCONN);
+                }
+            }
 
-            /* --- Web 对频状态监控 --- */
-            rc_wf_poll_bind();
+            /* ---- SB 解锁开关（2段拨码）边沿检测 ---- */
+            bool sb_now = (joy.aux2 > 1500);  // SB → CH6 → aux2
+            if (sb_now != prev_sb_state) {
+                prev_sb_state = sb_now;
+                if (sb_now) {
+                    audio_play(SOUND_ARMED);   // 打开 → 已解锁
+                } else {
+                    audio_play(SOUND_LOCKED);  // 关闭 → 已锁定
+                }
+            }
 
-            /* --- CRSF 菜单加载进度跟踪 --- */
+            /* ---- RSSI 弱信号语音 ---- */
+            if (linked) {
+                if (state->rssi > 0 && state->rssi < 70) {
+                    if (now_ms - last_rssi_warn_ms >= 10000) {
+                        last_rssi_warn_ms = now_ms;
+                        audio_play(SOUND_RSSI_RED);
+                    }
+                } else if (state->rssi < 90) {
+                    if (now_ms - last_rssi_warn_ms >= 30000) {
+                        last_rssi_warn_ms = now_ms;
+                        audio_play(SOUND_RSSI_ORG);
+                    }
+                }
+            }
+
+            /* ---- 通道发送 ---- */
+            if (crsf_always_sync || linked)
+                sync_joy_to_crsf(&joy);
+
+            /* ---- CRSF 菜单加载进度跟踪 ---- */
             if (state->loaded_params != last_loaded_params) {
                 last_loaded_params = state->loaded_params;
                 if (!printed_full_snapshot && state->total_params > 0 &&

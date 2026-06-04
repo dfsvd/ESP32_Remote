@@ -100,14 +100,7 @@ static size_t wav_find_data(const uint8_t *start, const uint8_t *end,
 
 SOUND_DECL(hello);
 SOUND_DECL(armed);
-SOUND_DECL(takeof);
-SOUND_DECL(rth);
 SOUND_DECL(modesw);
-SOUND_DECL(stbmod);
-SOUND_DECL(sxrahd);
-SOUND_DECL(sxrman);
-SOUND_DECL(turton);
-SOUND_DECL(turtof);
 SOUND_DECL(fpvmod);
 SOUND_DECL(btmod);
 SOUND_DECL(wifimd);
@@ -119,8 +112,6 @@ SOUND_DECL(btcon);
 SOUND_DECL(btdcn);
 SOUND_DECL(lowbatt);
 SOUND_DECL(lowbat);
-SOUND_DECL(siglow);
-SOUND_DECL(sigcrt);
 SOUND_DECL(rssi_org);
 SOUND_DECL(rssi_red);
 SOUND_DECL(telemok);
@@ -131,7 +122,11 @@ SOUND_DECL(thralert);
 SOUND_DECL(swalert);
 SOUND_DECL(inactiv);
 SOUND_DECL(rfmod);
-
+SOUND_DECL(binding);
+SOUND_DECL(binddone);
+SOUND_DECL(bindfail);
+SOUND_DECL(disconn);
+SOUND_DECL(lock);
 /* ================================================================
  * 音频数据查找表
  * ================================================================ */
@@ -150,14 +145,7 @@ typedef struct {
 static const sound_data_t s_sounds[SOUND_COUNT] = {
     SOUND_ENTRY(SOUND_HELLO, hello),
     SOUND_ENTRY(SOUND_ARMED, armed),
-    SOUND_ENTRY(SOUND_TAKEOF, takeof),
-    SOUND_ENTRY(SOUND_RTH, rth),
     SOUND_ENTRY(SOUND_MODESW, modesw),
-    SOUND_ENTRY(SOUND_STBMOD, stbmod),
-    SOUND_ENTRY(SOUND_SXRAHD, sxrahd),
-    SOUND_ENTRY(SOUND_SXRMAN, sxrman),
-    SOUND_ENTRY(SOUND_TURTON, turton),
-    SOUND_ENTRY(SOUND_TURTOF, turtof),
     SOUND_ENTRY(SOUND_FPVMOD, fpvmod),
     SOUND_ENTRY(SOUND_BTMOD, btmod),
     SOUND_ENTRY(SOUND_WIFIMD, wifimd),
@@ -169,8 +157,6 @@ static const sound_data_t s_sounds[SOUND_COUNT] = {
     SOUND_ENTRY(SOUND_BTDCN, btdcn),
     SOUND_ENTRY(SOUND_LOWBATT, lowbatt),
     SOUND_ENTRY(SOUND_LOWBAT, lowbat),
-    SOUND_ENTRY(SOUND_SIGLOW, siglow),
-    SOUND_ENTRY(SOUND_SIGCRT, sigcrt),
     SOUND_ENTRY(SOUND_RSSI_ORG, rssi_org),
     SOUND_ENTRY(SOUND_RSSI_RED, rssi_red),
     SOUND_ENTRY(SOUND_TELEMOK, telemok),
@@ -181,6 +167,11 @@ static const sound_data_t s_sounds[SOUND_COUNT] = {
     SOUND_ENTRY(SOUND_SWALERT, swalert),
     SOUND_ENTRY(SOUND_INACTIV, inactiv),
     SOUND_ENTRY(SOUND_RFMOD, rfmod),
+    SOUND_ENTRY(SOUND_BINDING, binding),
+    SOUND_ENTRY(SOUND_BINDDONE, binddone),
+    SOUND_ENTRY(SOUND_BINDFAIL, bindfail),
+    SOUND_ENTRY(SOUND_DISCONN, disconn),
+    SOUND_ENTRY(SOUND_LOCKED, lock),
 };
 
 #undef SOUND_ENTRY
@@ -191,11 +182,9 @@ static const sound_data_t s_sounds[SOUND_COUNT] = {
 static const audio_priority_t s_priorities[SOUND_COUNT] = {
     [SOUND_THRALERT] = AUDIO_PRIO_CRITICAL,
     [SOUND_SWALERT] = AUDIO_PRIO_CRITICAL,
-    [SOUND_SIGCRT] = AUDIO_PRIO_CRITICAL,
 
     [SOUND_RSSI_RED] = AUDIO_PRIO_HIGH,
     [SOUND_RSSI_ORG] = AUDIO_PRIO_HIGH,
-    [SOUND_SIGLOW] = AUDIO_PRIO_HIGH,
     [SOUND_LOWBATT] = AUDIO_PRIO_HIGH,
     [SOUND_LOWBAT] = AUDIO_PRIO_HIGH,
     [SOUND_TELEMKO] = AUDIO_PRIO_HIGH,
@@ -210,35 +199,26 @@ static const audio_priority_t s_priorities[SOUND_COUNT] = {
  * ================================================================ */
 static const char *s_names[] = {
     [SOUND_HELLO] = "hello",       [SOUND_ARMED] = "armed",
-    [SOUND_TAKEOF] = "takeof",     [SOUND_RTH] = "rth",
-    [SOUND_MODESW] = "modesw",     [SOUND_STBMOD] = "stbmod",
-    [SOUND_SXRAHD] = "sxrahd",     [SOUND_SXRMAN] = "sxrman",
-    [SOUND_TURTON] = "turton",     [SOUND_TURTOF] = "turtof",
-    [SOUND_FPVMOD] = "fpvmod",     [SOUND_BTMOD] = "btmod",
-    [SOUND_WIFIMD] = "wifimd",     [SOUND_USBMOD] = "usbmod",
-    [SOUND_XBOXMOD] = "xboxmod",   [SOUND_WIFICON] = "wificon",
-    [SOUND_WIFIDCN] = "wifidcn",   [SOUND_BTCON] = "btcon",
-    [SOUND_BTDCN] = "btdcn",       [SOUND_LOWBATT] = "lowbatt",
-    [SOUND_LOWBAT] = "lowbat",     [SOUND_SIGLOW] = "siglow",
-    [SOUND_SIGCRT] = "sigcrt",     [SOUND_RSSI_ORG] = "rssi_org",
-    [SOUND_RSSI_RED] = "rssi_red", [SOUND_TELEMOK] = "telemok",
-    [SOUND_TELEMKO] = "telemko",   [SOUND_SENSORKO] = "sensorko",
-    [SOUND_MODELPWR] = "modelpwr", [SOUND_THRALERT] = "thralert",
-    [SOUND_SWALERT] = "swalert",   [SOUND_INACTIV] = "inactiv",
-    [SOUND_RFMOD] = "rfmod",
+    [SOUND_MODESW] = "modesw",     [SOUND_FPVMOD] = "fpvmod",
+    [SOUND_BTMOD] = "btmod",       [SOUND_WIFIMD] = "wifimd",
+    [SOUND_USBMOD] = "usbmod",     [SOUND_XBOXMOD] = "xboxmod",
+    [SOUND_WIFICON] = "wificon",   [SOUND_WIFIDCN] = "wifidcn",
+    [SOUND_BTCON] = "btcon",       [SOUND_BTDCN] = "btdcn",
+    [SOUND_LOWBATT] = "lowbatt",   [SOUND_LOWBAT] = "lowbat",
+    [SOUND_RSSI_ORG] = "rssi_org", [SOUND_RSSI_RED] = "rssi_red",
+    [SOUND_TELEMOK] = "telemok",   [SOUND_TELEMKO] = "telemko",
+    [SOUND_SENSORKO] = "sensorko", [SOUND_MODELPWR] = "modelpwr",
+    [SOUND_THRALERT] = "thralert", [SOUND_SWALERT] = "swalert",
+    [SOUND_INACTIV] = "inactiv",   [SOUND_RFMOD] = "rfmod",
+    [SOUND_BINDING] = "binding",   [SOUND_BINDDONE] = "binddone",
+    [SOUND_BINDFAIL] = "bindfail", [SOUND_DISCONN] = "disconn",
+    [SOUND_LOCKED] = "lock",
 };
 
 static const char *s_names_cn[] = {
     [SOUND_HELLO] = "开机",
     [SOUND_ARMED] = "已解锁",
-    [SOUND_TAKEOF] = "起飞",
-    [SOUND_RTH] = "返航",
     [SOUND_MODESW] = "模式切换",
-    [SOUND_STBMOD] = "稳定模式",
-    [SOUND_SXRAHD] = "定高模式",
-    [SOUND_SXRMAN] = "手动模式",
-    [SOUND_TURTON] = "开启乌龟模式",
-    [SOUND_TURTOF] = "关闭乌龟模式",
     [SOUND_FPVMOD] = "FPV模式",
     [SOUND_BTMOD] = "蓝牙模式",
     [SOUND_WIFIMD] = "WiFi模式",
@@ -250,8 +230,6 @@ static const char *s_names_cn[] = {
     [SOUND_BTDCN] = "蓝牙断开",
     [SOUND_LOWBATT] = "遥控器电压低",
     [SOUND_LOWBAT] = "电池电压低",
-    [SOUND_SIGLOW] = "信号弱",
-    [SOUND_SIGCRT] = "信号危险",
     [SOUND_RSSI_ORG] = "射频信号弱",
     [SOUND_RSSI_RED] = "射频信号危险",
     [SOUND_TELEMOK] = "回传恢复",
@@ -262,6 +240,11 @@ static const char *s_names_cn[] = {
     [SOUND_SWALERT] = "开关不在初始位置",
     [SOUND_INACTIV] = "长时间无操作",
     [SOUND_RFMOD] = "射频模式",
+    [SOUND_BINDING] = "正在连接接收机",
+    [SOUND_BINDDONE] = "连接成功",
+    [SOUND_BINDFAIL] = "连接失败",
+    [SOUND_DISCONN] = "已断开",
+    [SOUND_LOCKED] = "已锁定",
 };
 
 /* ================================================================

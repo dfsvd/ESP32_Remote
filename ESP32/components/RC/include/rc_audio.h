@@ -23,14 +23,7 @@ extern "C" {
 typedef enum {
     SOUND_HELLO = 0, // 开机
     SOUND_ARMED,     // 已解锁
-    SOUND_TAKEOF,    // 起飞
-    SOUND_RTH,       // 返航
     SOUND_MODESW,    // 模式切换
-    SOUND_STBMOD,    // 稳定模式
-    SOUND_SXRAHD,    // 定高模式
-    SOUND_SXRMAN,    // 手动模式
-    SOUND_TURTON,    // 开启乌龟模式
-    SOUND_TURTOF,    // 关闭乌龟模式
     SOUND_FPVMOD,    // FPV 模式
     SOUND_BTMOD,     // 蓝牙模式
     SOUND_WIFIMD,    // WiFi 模式
@@ -42,8 +35,6 @@ typedef enum {
     SOUND_BTDCN,     // 蓝牙断开
     SOUND_LOWBATT,   // 遥控器电压低
     SOUND_LOWBAT,    // 电池电压低
-    SOUND_SIGLOW,    // 信号弱
-    SOUND_SIGCRT,    // 信号危险
     SOUND_RSSI_ORG,  // 射频信号弱
     SOUND_RSSI_RED,  // 射频信号危险
     SOUND_TELEMOK,   // 回传恢复
@@ -54,6 +45,11 @@ typedef enum {
     SOUND_SWALERT,   // 警告:开关不在初始位置
     SOUND_INACTIV,   // 长时间无操作
     SOUND_RFMOD,     // 射频模式
+    SOUND_BINDING,   // 正在连接接收机
+    SOUND_BINDDONE,  // 连接成功
+    SOUND_BINDFAIL,  // 连接失败
+    SOUND_DISCONN,   // 已断开
+    SOUND_LOCKED,    // 已锁定
     SOUND_COUNT,
 } sound_id_t;
 
