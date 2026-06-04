@@ -493,7 +493,7 @@ static uint16_t read_sb_sc(gpio_num_t pin1, gpio_num_t pin2, uint8_t mode) {
 }
 
 /**
- * @brief 单引脚三段开关读取
+ * @brief 单引脚三段开关读取（底层无状态采样）
  * @param pin GPIO 编号
  * @return uint16_t 1000(下), 1500(中), 2000(上)
  *
@@ -504,11 +504,11 @@ static uint16_t read_sb_sc(gpio_num_t pin1, gpio_num_t pin2, uint8_t mode) {
  */
 static uint16_t read_3pos_single_gpio(gpio_num_t pin) {
     gpio_set_pull_mode(pin, GPIO_PULLUP_ONLY);
-    esp_rom_delay_us(5);
+    esp_rom_delay_us(15);
     int val_pu = gpio_get_level(pin);
 
     gpio_set_pull_mode(pin, GPIO_PULLDOWN_ONLY);
-    esp_rom_delay_us(5);
+    esp_rom_delay_us(15);
     int val_pd = gpio_get_level(pin);
 
     /* 恢复为内部上拉（与其他开关引脚一致） */
@@ -520,21 +520,44 @@ static uint16_t read_3pos_single_gpio(gpio_num_t pin) {
 }
 
 /**
- * @brief 读取实体开关，填入源数组 
+ * @brief 读取实体开关，填入源数组（含 SC 消抖）
  * @param src     源映射值数组 (1000~2000)
  * @param src_raw 源原始值数组 (开关无 ADC，与 src 相同)
+ *
+ * SC 消抖策略：连续 3 次采样（~19ms）一致才确认状态改变，
+ *              覆盖机械开关 5~20ms 弹跳窗口。
  */
+#define SC_DEBOUNCE_TARGET 3
+
 void update_switch_channels(uint16_t src[16], uint16_t src_raw[16]) {
     // 4个实体开关 → 物理源索引 4~7
     src[4] = read_sa_sd(RC_SWITCH_SA_PIN, btn_cfg[0]);       // SA → 物理源4
     src[5] = read_sb_sc(RC_SWITCH_SB_PIN, 0xFF, btn_cfg[1]); // SB → 物理源5
-    src[6] = read_3pos_single_gpio(RC_SWITCH_SC_PIN);         // SC → 物理源6
-    src[7] = read_sa_sd(RC_SWITCH_SD_PIN, btn_cfg[3]); // SD → 物理源7
+    src[7] = read_sa_sd(RC_SWITCH_SD_PIN, btn_cfg[3]);       // SD → 物理源7
 
     src_raw[4] = src[4];
     src_raw[5] = src[5];
-    src_raw[6] = src[6];
     src_raw[7] = src[7];
+
+    // ---- SC 单引脚三段开关：去抖状态机 ----
+    static uint16_t s_sc_stable = 1500;
+    static uint16_t s_sc_last   = 1500;
+    static uint8_t  s_sc_cnt    = 0;
+
+    uint16_t cur = read_3pos_single_gpio(RC_SWITCH_SC_PIN);
+    if (cur == s_sc_last) {
+        if (s_sc_cnt < SC_DEBOUNCE_TARGET) {
+            s_sc_cnt++;
+        } else {
+            s_sc_stable = cur;
+        }
+    } else {
+        s_sc_cnt    = 0;
+        s_sc_last   = cur;
+    }
+
+    src[6]     = s_sc_stable;
+    src_raw[6] = s_sc_stable;
 }
 
 void ADC_TASK(void *arg) {
