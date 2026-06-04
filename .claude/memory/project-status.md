@@ -9,7 +9,39 @@ metadata:
 
 FPV 遥控器手柄，基于 ESP32-S3，16MB Flash + 8MB PSRAM。
 两个子项目：**ESP32 固件**（ESP-IDF）和 **Web 前端**（Vue 3 + Vite）。
-固件构建：`cd ESP32/ && idf.py build`。
+
+## 编译
+
+### ESP32 固件
+
+```bash
+cd /home/xinian/Code/tusb_hid/ESP32/
+source /home/xinian/.espressif/python_env/idf5.5_py3.14_env/bin/activate
+export IDF_PATH=/home/xinian/.espressif/v5.5.4/esp-idf
+. /home/xinian/.espressif/v5.5.4/esp-idf/export.sh
+idf.py build
+```
+
+或一行完成：
+```bash
+cd /home/xinian/Code/tusb_hid/ESP32/ && source /home/xinian/.espressif/python_env/idf5.5_py3.14_env/bin/activate 2>/dev/null && export IDF_PATH=/home/xinian/.espressif/v5.5.4/esp-idf && . /home/xinian/.espressif/v5.5.4/esp-idf/export.sh > /dev/null 2>&1 && idf.py build
+```
+
+### 烧录 + 监视
+
+```bash
+idf.py flash monitor
+```
+
+### Web 前端（Vue 3 + Vite）
+
+```bash
+cd /home/xinian/Code/tusb_hid/web
+npm install
+npm run dev              # 开发服务器 http://localhost:5174
+npm run build            # 构建到 dist/
+npm run build:esp32      # 构建 + 同步到 ESP32/components/RC/src/index.html
+```
 
 ## 硬件接线
 
@@ -61,16 +93,22 @@ FPV 遥控器手柄，基于 ESP32-S3，16MB Flash + 8MB PSRAM。
 
 ## 开机模式选择
 
-SA+SD 同时长按 3秒 → **WiFi 模式**（播 Wi-Fi 模式后等播完再 init WiFi + CRSF）
+统一 `boot_mode_t` 枚举，检测与初始化分离。
+
 SD 按下 → **自动对频**（纯射频 + 播射频模式）
 SA 长按 3秒 → **摇杆选择**：
-  - 上推(pitch < 1300) → **BLE 模式**（播蓝牙模式，等播完再 init BLE）
-  - 下推(pitch > 1700) → **USB 模式**（播 USB 模式，等播完再 init USB）
+  - 上推(pitch < 1300) → **USB 模式**（播 USB 模式，等播完再 init USB）
+  - 下推(pitch > 1700) → **BLE 模式**（播蓝牙模式，等播完再 init BLE）
   - 右推(roll > 1700) → **纯射频模式**（播射频模式）
-  - 超时(5s) → 纯射频模式
-无按键 → **纯射频模式**（播射频模式）
+  - **SD 按下** → **WiFi 模式**（播 Wi-Fi 模式后等播完再 init WiFi + CRSF）
+  - 超时(5s) → 回退上次模式（当前写死为 BOOT_MODE_RF，未来从 NVS 读）
+SA 短按(<3s) → 回退上次模式
+无按键 → 回退上次模式
 
-**CRSF 条件初始化：** 只在纯射频 / WiFi / 对频模式下启动。
+兜底逻辑：用户未主动选择 → `get_default_mode()` 取上次保存的模式。
+当前写死 `BOOT_MODE_RF`，未来改 `nvs_read_boot_mode()` 即可。
+
+**CRSF 条件初始化：** 只在纯射频 / 自动对频 / WiFi 模式下启动。
 BLE 和 USB 模式下不初始化 CRSF，省电。
 
 ## 音频系统
