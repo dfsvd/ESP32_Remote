@@ -87,19 +87,16 @@ typedef struct {
 // 开关引脚 — 以遥控器物理标识命名
 #define RC_SWITCH_SA_PIN GPIO_NUM_36      // SA: 按键(自复位) → CH5
 #define RC_SWITCH_SB_PIN GPIO_NUM_37      // SB: 2段拨码      → CH6
-#define RC_SWITCH_SC_UP_PIN GPIO_NUM_39   // SC: 3段拨码 UP   → CH7
-#define RC_SWITCH_SC_DOWN_PIN GPIO_NUM_40 // SC: 3段拨码 DOWN → CH7
+#define RC_SWITCH_SC_PIN GPIO_NUM_39      // SC: 3段拨码(单线) → CH7
 #define RC_SWITCH_SD_PIN GPIO_NUM_38      // SD: 按键(自复位) → CH8
 
 #define GPIO_SW                                                                \
-    ((1ULL << RC_SWITCH_SA_PIN) | (1ULL << RC_SWITCH_SC_UP_PIN) |              \
-     (1ULL << RC_SWITCH_SC_DOWN_PIN) | (1ULL << RC_SWITCH_SD_PIN) |            \
-     (1ULL << RC_SWITCH_SB_PIN))
+    ((1ULL << RC_SWITCH_SA_PIN) | (1ULL << RC_SWITCH_SC_PIN) |               \
+     (1ULL << RC_SWITCH_SD_PIN) | (1ULL << RC_SWITCH_SB_PIN))
 
 #define READ_KEY_SA read_2pos_switch(RC_SWITCH_SA_PIN, true)  // 按键 → CH8
 #define READ_KEY_SB read_2pos_switch(RC_SWITCH_SB_PIN, false) // 2段  → CH6
-#define READ_KEY_SC                                                            \
-    read_3pos_switch(RC_SWITCH_SC_UP_PIN, RC_SWITCH_SC_DOWN_PIN) // 3段  → CH7
+#define READ_KEY_SC read_3pos_single_gpio(RC_SWITCH_SC_PIN)   // 3段  → CH7
 #define READ_KEY_SD read_2pos_switch(RC_SWITCH_SD_PIN, true)     // 按键 → CH5
 #define READ_KEY_FIXED1 1500
 #define READ_KEY_FIXED2 1500

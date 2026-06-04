@@ -10,15 +10,6 @@ modelpwr.wav,接收机未关闭,Receiver still powered
 lowbatt.wav,遥控器电压低,Radio battery low
 inactiv.wav,警告长时间无操作,Inactivity warning
 hello.wav,开机,Welcome
-turtof.wav,关闭乌龟模式,Turtle mode off
-turton.wav,开启乌龟模式,Turtle mode on
-takeof.wav,起飞,Takeoff
-stbmod.wav,稳定模式,Stabilize mode
-sxrahd.wav,定高模式,Altitude hold mode
-sxrman.wav,手动模式,Manual mode
-siglow.wav,射频信号弱,Signal low
-sigcrt.wav,射频信号危险,Signal critical
-rth.wav,返航,Return to home
 lowbat.wav,电池电压低,Battery low
 armed.wav,已解锁,Armed
 modesw.wav,模式切换,Mode switch

@@ -493,8 +493,34 @@ static uint16_t read_sb_sc(gpio_num_t pin1, gpio_num_t pin2, uint8_t mode) {
 }
 
 /**
- * @brief 读取实体开关，填入源数组 (不经 EPA/REV，由 apply_ch_map_to_joy
- * 统一处理)
+ * @brief 单引脚三段开关读取
+ * @param pin GPIO 编号
+ * @return uint16_t 1000(下), 1500(中), 2000(上)
+ *
+ * 工作原理：开关公共端接 pin，上档接 VCC，下档接 GND，中档悬空。
+ *           上拉读1 + 下拉读1 = VCC(上档)
+ *           上拉读0 + 下拉读0 = GND(下档)
+ *           上拉读1 + 下拉读0 = 悬空(中档)
+ */
+static uint16_t read_3pos_single_gpio(gpio_num_t pin) {
+    gpio_set_pull_mode(pin, GPIO_PULLUP_ONLY);
+    esp_rom_delay_us(5);
+    int val_pu = gpio_get_level(pin);
+
+    gpio_set_pull_mode(pin, GPIO_PULLDOWN_ONLY);
+    esp_rom_delay_us(5);
+    int val_pd = gpio_get_level(pin);
+
+    /* 恢复为内部上拉（与其他开关引脚一致） */
+    gpio_set_pull_mode(pin, GPIO_PULLUP_ONLY);
+
+    if (val_pu == 1 && val_pd == 1) return 2000; // 上档 → VCC
+    if (val_pu == 0 && val_pd == 0) return 1000; // 下档 → GND
+    return 1500; // 中档 → 悬空
+}
+
+/**
+ * @brief 读取实体开关，填入源数组 
  * @param src     源映射值数组 (1000~2000)
  * @param src_raw 源原始值数组 (开关无 ADC，与 src 相同)
  */
@@ -502,8 +528,7 @@ void update_switch_channels(uint16_t src[16], uint16_t src_raw[16]) {
     // 4个实体开关 → 物理源索引 4~7
     src[4] = read_sa_sd(RC_SWITCH_SA_PIN, btn_cfg[0]);       // SA → 物理源4
     src[5] = read_sb_sc(RC_SWITCH_SB_PIN, 0xFF, btn_cfg[1]); // SB → 物理源5
-    src[6] = read_sb_sc(RC_SWITCH_SC_UP_PIN, RC_SWITCH_SC_DOWN_PIN,
-                        btn_cfg[2]);                   // SC → 物理源6
+    src[6] = read_3pos_single_gpio(RC_SWITCH_SC_PIN);         // SC → 物理源6
     src[7] = read_sa_sd(RC_SWITCH_SD_PIN, btn_cfg[3]); // SD → 物理源7
 
     src_raw[4] = src[4];

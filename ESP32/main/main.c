@@ -569,7 +569,7 @@ void app_main(void) {
     const gpio_config_t mode_select_config = {
         .pin_bit_mask =
             (1ULL << RC_SWITCH_SA_PIN) | (1ULL << RC_SWITCH_SD_PIN) |
-            (1ULL << RC_SWITCH_SC_UP_PIN) | (1ULL << RC_SWITCH_SC_DOWN_PIN),
+            (1ULL << RC_SWITCH_SC_PIN) | (1ULL << RC_SWITCH_SB_PIN),
         .mode = GPIO_MODE_INPUT,
         .intr_type = GPIO_INTR_DISABLE,
         .pull_up_en = true,
