@@ -364,19 +364,23 @@ static void crsf_tx_task(void *arg) {
                 s_last_rc_frame_ms = now_ms;
             }
 
-            // 真正的阻塞加载逻辑
+            // 参数加载逻辑 — 发现新项立即发送请求
             if (s_state.total_params > 0 &&
                 s_current_req_id <= s_state.total_params) {
                 crsf_menu_item_t *m = &s_state.menu[s_current_req_id - 1];
                 if (!m->is_valid) {
-                    if (!s_waiting_param_resp)
-                        retry_count = 0;
-                    if (++req_timer >= 25) { // 500ms 重试一次
+                    if (!s_waiting_param_resp) {
+                        // 当前无待应答 → 立即发送请求
                         internal_req_param(s_current_req_id,
                                            s_current_req_chunk);
                         s_waiting_param_resp = true;
                         req_timer = 0;
-                        if (++retry_count > 10) {
+                        retry_count = 0;
+                    } else if (++req_timer >= 15) {  // 15 * 20ms = 300ms 超时重试
+                        internal_req_param(s_current_req_id,
+                                           s_current_req_chunk);
+                        req_timer = 0;
+                        if (++retry_count > 5) {
                             ESP_LOGW(TAG, "参数 %u chunk %u 超时，跳过",
                                      s_current_req_id, s_current_req_chunk);
                             reset_param_request_state();
@@ -386,8 +390,6 @@ static void crsf_tx_task(void *arg) {
                     }
                 } else {
                     s_current_req_id++;
-                    req_timer = 0;
-                    retry_count = 0;
                     reset_param_request_state();
                 }
             }
