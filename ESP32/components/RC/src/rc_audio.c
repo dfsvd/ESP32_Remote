@@ -44,7 +44,7 @@ static const char *TAG = "audio_player";
 #define AUDIO_TASK_PRIO 5
 
 /* 音量增益 */
-#define VOLUME_GAIN_PCT 50
+#define VOLUME_GAIN_PCT 10
 
 /* ================================================================
  * WAV 文件头 (44 bytes 标准格式)

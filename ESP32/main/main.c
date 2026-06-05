@@ -56,6 +56,12 @@ static const char *TAG = "FPV_RC";
 #define BOOT_STICK_RIGHT_THRESH 1700      // 右摇杆右打阈值 (>此值)
 #define BOOT_DEBOUNCE_MS 80               // 按键消抖时间
 
+// ---- RSSI 信号阈值 ----
+#define RSSI_WARN_ORG 120      // CRSF RSSI < 此值 → 播"信号弱"
+#define RSSI_WARN_RED 90       // CRSF RSSI < 此值 → 播"信号危险"
+#define RSSI_ORG_INTERVAL_MS 30000U    // 信号弱播报间隔
+#define RSSI_RED_INTERVAL_MS 10000U    // 信号危险播报间隔
+
 /* =========================================================================
  * 开机模式枚举
  * ========================================================================= */
@@ -759,15 +765,18 @@ void app_main(void) {
 
             /* ---- RSSI 弱信号语音 ---- */
             if (linked) {
-                if (state->rssi > 0 && state->rssi < 70) {
-                    if (now_ms - last_rssi_warn_ms >= 10000) {
+                if (state->rssi > 0 && state->rssi < RSSI_WARN_RED) {
+                    if (now_ms - last_rssi_warn_ms >= RSSI_RED_INTERVAL_MS) {
                         last_rssi_warn_ms = now_ms;
                         audio_play(SOUND_RSSI_RED);
                     }
-                } else if (state->rssi < 90) {
-                    if (now_ms - last_rssi_warn_ms >= 30000) {
+                } else if (state->rssi < RSSI_WARN_ORG) {
+                    if (now_ms - last_rssi_warn_ms >= RSSI_ORG_INTERVAL_MS) {
                         last_rssi_warn_ms = now_ms;
                         audio_play(SOUND_RSSI_ORG);
+                    }
+                }
+            }
                     }
                 }
             }
