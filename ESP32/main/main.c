@@ -777,9 +777,6 @@ void app_main(void) {
                     }
                 }
             }
-                    }
-                }
-            }
 
             /* ---- 通道发送 ---- */
             if (crsf_always_sync || linked)
