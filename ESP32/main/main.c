@@ -681,7 +681,6 @@ void app_main(void) {
     bool prev_sb_state = false;   // SB 解锁开关上一个状态 (false=锁)
     bool bind_pending = false;     // 正在连接中
     uint32_t bind_start_ms = 0;    // 开始连接的时间戳
-    bool bind_retry_played = false;
     uint32_t last_rssi_warn_ms = 0;
 
     bool printed_full_snapshot = false;
@@ -716,16 +715,14 @@ void app_main(void) {
                         crsf_write_menu_value(bind_param, 1);
                         bind_pending = true;
                         bind_start_ms = now_ms;
-                        bind_retry_played = false;
                         led_set_mode(LED_MODE_BIND);
                     }
                 }
 
                 if (bind_pending) {
                     if (linked) {
-                        // 连接成功
+                        // 连接成功 — telemok 会自然发出"回传恢复"
                         bind_pending = false;
-                        audio_play(SOUND_BINDDONE);
                         led_set_mode(LED_MODE_CRSF_RF);
                         ESP_LOGI(TAG, "连接成功");
                     } else if (now_ms - bind_start_ms >= BIND_TIMEOUT_MS) {
@@ -734,10 +731,6 @@ void app_main(void) {
                         audio_play(SOUND_BINDFAIL);
                         led_set_mode(LED_MODE_CRSF_RF);
                         ESP_LOGW(TAG, "连接超时（%ums）", BIND_TIMEOUT_MS);
-                    } else if (!bind_retry_played &&
-                               now_ms - bind_start_ms >= 5000) {
-                        bind_retry_played = true;
-                        // 5s还没连上，重新尝试一次
                     }
                 }
             }
@@ -748,9 +741,8 @@ void app_main(void) {
                 if (linked) {
                     audio_play(SOUND_TELEMOK);
                 } else if (!bind_pending) {
-                    // 不是正在尝试连接断开 → 播已断开
+                    // 不是正在尝试连接断开 → 播回传丢失
                     audio_play(SOUND_TELEMKO);
-                    audio_play(SOUND_DISCONN);
                 }
             }
 

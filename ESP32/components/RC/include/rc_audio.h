@@ -46,9 +46,7 @@ typedef enum {
     SOUND_INACTIV,   // 长时间无操作
     SOUND_RFMOD,     // 射频模式
     SOUND_BINDING,   // 正在连接接收机
-    SOUND_BINDDONE,  // 连接成功
     SOUND_BINDFAIL,  // 连接失败
-    SOUND_DISCONN,   // 已断开
     SOUND_LOCKED,    // 已锁定
     SOUND_COUNT,
 } sound_id_t;

@@ -43,8 +43,8 @@ static const char *TAG = "audio_player";
 #define AUDIO_TASK_STACK 4096
 #define AUDIO_TASK_PRIO 5
 
-/* 音量增益: 50 = 约 -6dB, 显著降低峰值功耗避免棕出 */
-#define VOLUME_GAIN_PCT 10
+/* 音量增益 */
+#define VOLUME_GAIN_PCT 50
 
 /* ================================================================
  * WAV 文件头 (44 bytes 标准格式)
@@ -123,9 +123,7 @@ SOUND_DECL(swalert);
 SOUND_DECL(inactiv);
 SOUND_DECL(rfmod);
 SOUND_DECL(binding);
-SOUND_DECL(binddone);
 SOUND_DECL(bindfail);
-SOUND_DECL(disconn);
 SOUND_DECL(lock);
 /* ================================================================
  * 音频数据查找表
@@ -168,9 +166,7 @@ static const sound_data_t s_sounds[SOUND_COUNT] = {
     SOUND_ENTRY(SOUND_INACTIV, inactiv),
     SOUND_ENTRY(SOUND_RFMOD, rfmod),
     SOUND_ENTRY(SOUND_BINDING, binding),
-    SOUND_ENTRY(SOUND_BINDDONE, binddone),
     SOUND_ENTRY(SOUND_BINDFAIL, bindfail),
-    SOUND_ENTRY(SOUND_DISCONN, disconn),
     SOUND_ENTRY(SOUND_LOCKED, lock),
 };
 
@@ -210,8 +206,7 @@ static const char *s_names[] = {
     [SOUND_SENSORKO] = "sensorko", [SOUND_MODELPWR] = "modelpwr",
     [SOUND_THRALERT] = "thralert", [SOUND_SWALERT] = "swalert",
     [SOUND_INACTIV] = "inactiv",   [SOUND_RFMOD] = "rfmod",
-    [SOUND_BINDING] = "binding",   [SOUND_BINDDONE] = "binddone",
-    [SOUND_BINDFAIL] = "bindfail", [SOUND_DISCONN] = "disconn",
+    [SOUND_BINDING] = "binding",   [SOUND_BINDFAIL] = "bindfail",
     [SOUND_LOCKED] = "lock",
 };
 
@@ -241,9 +236,7 @@ static const char *s_names_cn[] = {
     [SOUND_INACTIV] = "长时间无操作",
     [SOUND_RFMOD] = "射频模式",
     [SOUND_BINDING] = "正在连接接收机",
-    [SOUND_BINDDONE] = "连接成功",
     [SOUND_BINDFAIL] = "连接失败",
-    [SOUND_DISCONN] = "已断开",
     [SOUND_LOCKED] = "已锁定",
 };
 

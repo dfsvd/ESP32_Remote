@@ -24,7 +24,5 @@ xboxmod.wav,xbox 模式,Xbox mode
 fpvmod.wav,fpv 模式,FPV mode
 rfmod.wav,射频模式,RF mode
 binding.wav,正在连接接收机,Binding receiver
-binddone.wav,连接成功,Connected
 bindfail.wav,连接失败,Binding failed
-disconn.wav,已断开,Disconnected
 lock.wav,已锁定,Locked
