@@ -809,24 +809,32 @@ void app_main(void) {
                     s_last_telem_print = now_ms;
                     const crsf_telemetry_t *t = &state->telemetry;
                     if (t->last_update_ms > 0) {
+                        const uint16_t alt_m = (t->gps.altitude > 1000)
+                                                   ? (t->gps.altitude - 1000) : 0;
                         ESP_LOGI(TAG,
-                                 "📡 回传: "
-                                 "电池%.1fV/%.1fA/%umAh/%u%% "
-                                 "GPS %.6f,%.6f %ucm %ucm/s %u° "
-                                 "姿态 %.1f° %.1f° %.1f° "
-                                 "气压%.0fm %+.1fm/s",
+                                 "\n"
+                                 "╔═══════════════════ CRSF 遥测 ═══════════════════\n"
+                                 "║ ⚡ 电池  %.1fV / %.1fA  %umAh  %u%%\n"
+                                 "║ 🛰 GPS    %.6f, %.6f\n"
+                                 "║          %um  %ucm/s  %u°  %u颗\n"
+                                 "║ 📐 姿态  Pitch %+.1f°  Roll %+.1f°  Yaw %+.1f°\n"
+                                 "║ 📊 气压  %.0fm  %+.1fm/s \n"
+                                 "║ 🏷 模式  %s \n"
+                                 "╚══════════════════════════════════════════════════\n",
                                  (double)t->battery.voltage / 10.0,
                                  (double)t->battery.current / 10.0, t->battery.capacity,
                                  t->battery.remaining,
                                  (double)t->gps.latitude / 1e7,
                                  (double)t->gps.longitude / 1e7,
-                                 t->gps.altitude, t->gps.speed,
+                                 alt_m, t->gps.speed,
                                  t->gps.heading / 10,
+                                 t->gps.sats,
                                  (double)t->attitude.pitch * 180.0 / 31415.9,
                                  (double)t->attitude.roll * 180.0 / 31415.9,
                                  (double)t->attitude.yaw * 180.0 / 31415.9,
                                  (double)t->vario.altitude / 100.0,
-                                 (double)t->vario.vSpeed / 100.0);
+                                 (double)t->vario.vSpeed / 100.0,
+                                 t->flight_mode);
                     }
                 }
             }

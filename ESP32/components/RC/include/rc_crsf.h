@@ -32,6 +32,7 @@ typedef struct {
         uint16_t altitude;      // 海拔 m + 1000m
         uint16_t speed;         // 地速 km/h / 10
         uint16_t heading;       // 航向 度 / 100
+        uint8_t sats;           // 锁定卫星数
     } gps;
     struct {
         int16_t pitch;          // 俯仰 度*10

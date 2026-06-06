@@ -617,6 +617,7 @@ static void crsf_rx_task(void *arg) {
                                 s_state.telemetry.gps.speed     = (uint16_t)((payload[8] << 8) | payload[9]);    // km/h / 10
                                 s_state.telemetry.gps.heading   = (uint16_t)((payload[10] << 8) | payload[11]); // degree / 100
                                 s_state.telemetry.gps.altitude  = (uint16_t)((payload[12] << 8) | payload[13]); // m + 1000m
+                                s_state.telemetry.gps.sats      = payload[14];                                  // 卫星数
                                 s_state.telemetry.last_update_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
                             }
                         } else if (type == CRSF_FRAMETYPE_BATTERY) {
