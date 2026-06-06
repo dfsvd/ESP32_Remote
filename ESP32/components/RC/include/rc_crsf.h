@@ -18,6 +18,34 @@ typedef struct {
     uint8_t _raw_data[384]; // 🔥 扩容：从 192 增加到 384
 } crsf_menu_item_t;
 
+// 回传传感器数据结构体
+typedef struct {
+    struct {
+        uint16_t voltage;       // 电池电压 mV
+        uint16_t current;       // 电流 mA
+        uint32_t capacity;      // 消耗容量 mAh
+        uint8_t remaining;      // 剩余百分比 %
+    } battery;
+    struct {
+        int32_t latitude;       // 纬度 度*1e7
+        int32_t longitude;      // 经度 度*1e7
+        uint16_t altitude;      // 海拔 cm
+        uint16_t speed;         // 地速 cm/s
+        uint16_t heading;       // 航向 度*10
+    } gps;
+    struct {
+        int16_t pitch;          // 俯仰 度*10
+        int16_t roll;           // 横滚 度*10
+        int16_t yaw;            // 航向 度*10
+    } attitude;
+    struct {
+        int16_t altitude;       // 气压计海拔 cm
+        int16_t vSpeed;         // 垂直速度 cm/s
+    } vario;
+    uint8_t flight_mode[16];    // 飞行模式字符串
+    uint32_t last_update_ms;    // 最近一次回传更新时间戳
+} crsf_telemetry_t;
+
 // 全局状态机
 typedef struct {
     bool is_ready;
@@ -29,6 +57,7 @@ typedef struct {
     uint8_t total_params;
     uint8_t loaded_params;
     crsf_menu_item_t menu[CRSF_MAX_MENU_ITEMS];
+    crsf_telemetry_t telemetry;
     bool trigger_bind;
 } crsf_state_t;
 

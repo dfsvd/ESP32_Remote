@@ -802,6 +802,34 @@ void app_main(void) {
             if (state->loaded_params == 0)
                 printed_full_snapshot = false;
 
+            /* --- 回传数据状态打印（5秒间隔） --- */
+            {
+                static uint32_t s_last_telem_print = 0;
+                if (now_ms - s_last_telem_print >= 5000) {
+                    s_last_telem_print = now_ms;
+                    const crsf_telemetry_t *t = &state->telemetry;
+                    if (t->last_update_ms > 0) {
+                        ESP_LOGI(TAG,
+                                 "📡 回传: "
+                                 "电池%umV/%umAh/%u%% "
+                                 "GPS %.6f,%.6f %ucm %ucm/s %u° "
+                                 "姿态 %.1f° %.1f° %.1f° "
+                                 "气压%.0fm %+.1fm/s",
+                                 t->battery.voltage, t->battery.capacity,
+                                 t->battery.remaining,
+                                 (double)t->gps.latitude / 1e7,
+                                 (double)t->gps.longitude / 1e7,
+                                 t->gps.altitude, t->gps.speed,
+                                 t->gps.heading / 10,
+                                 (double)t->attitude.pitch * 180.0 / 31415.9,
+                                 (double)t->attitude.roll * 180.0 / 31415.9,
+                                 (double)t->attitude.yaw * 180.0 / 31415.9,
+                                 (double)t->vario.altitude / 100.0,
+                                 (double)t->vario.vSpeed / 100.0);
+                    }
+                }
+            }
+
             crsf_send_device_ping();
         }
 

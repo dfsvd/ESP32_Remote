@@ -19,6 +19,11 @@ static const char *TAG = "CRSF_ENGINE";
 #define CRSF_FRAMETYPE_PARAMETER_SETTINGS_ENTRY 0x2B
 #define CRSF_FRAMETYPE_PARAMETER_READ 0x2C
 #define CRSF_FRAMETYPE_PARAMETER_WRITE 0x2D
+#define CRSF_FRAMETYPE_ATTITUDE 0x1E
+#define CRSF_FRAMETYPE_GPS 0x02
+#define CRSF_FRAMETYPE_BATTERY 0x08
+#define CRSF_FRAMETYPE_VARIO 0x07
+#define CRSF_FRAMETYPE_FLIGHT_MODE 0x21
 #define CRSF_PARAM_TYPE_SELECT 0x09
 #define CRSF_PARAM_TYPE_STRING 0x0A
 #define CRSF_PARAM_TYPE_FOLDER 0x0B
@@ -140,6 +145,7 @@ static void crsf_reset_runtime_state(void) {
     s_state.total_params = 0;
     s_state.loaded_params = 0;
     memset(s_state.device_name, 0, sizeof(s_state.device_name));
+    memset(&s_state.telemetry, 0, sizeof(s_state.telemetry));
     memset(s_state.menu, 0, sizeof(s_state.menu));
     memset(s_last_device_name, 0, sizeof(s_last_device_name));
 
@@ -586,6 +592,59 @@ static void crsf_rx_task(void *arg) {
                                     }
                                 }
                             }
+                        } else if (type == CRSF_FRAMETYPE_ATTITUDE) {
+                            // 6字节: pitch(2) + roll(2) + yaw(2)，大端序，单位 rad*10000
+                            // frame_len = type(1) + data(6) + crc(1) = 8
+                            if (frame_len >= 8) {
+                                s_state.telemetry.attitude.pitch = (int16_t)((payload[0] << 8) | payload[1]);
+                                s_state.telemetry.attitude.roll  = (int16_t)((payload[2] << 8) | payload[3]);
+                                s_state.telemetry.attitude.yaw   = (int16_t)((payload[4] << 8) | payload[5]);
+                                s_state.telemetry.last_update_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                                ESP_LOGI(TAG, "姿态: p=%d(%+.1f°) r=%d(%+.1f°) y=%d(%+.1f°)",
+                                         s_state.telemetry.attitude.pitch,
+                                         (double)s_state.telemetry.attitude.pitch * 180.0 / 31415.9,
+                                         s_state.telemetry.attitude.roll,
+                                         (double)s_state.telemetry.attitude.roll * 180.0 / 31415.9,
+                                         s_state.telemetry.attitude.yaw,
+                                         (double)s_state.telemetry.attitude.yaw * 180.0 / 31415.9);
+                            }
+                        } else if (type == CRSF_FRAMETYPE_GPS) {
+                            // 15字节: lat(4) + lon(4) + speed(2) + heading(2) + alt(2) + sats(1)
+                            // frame_len = 17
+                            if (frame_len >= 17) {
+                                s_state.telemetry.gps.latitude  = (int32_t)((payload[0] << 24) | (payload[1] << 16) | (payload[2] << 8) | payload[3]);
+                                s_state.telemetry.gps.longitude = (int32_t)((payload[4] << 24) | (payload[5] << 16) | (payload[6] << 8) | payload[7]);
+                                s_state.telemetry.gps.speed     = (uint16_t)((payload[8] << 8) | payload[9]);    // km/h / 10
+                                s_state.telemetry.gps.heading   = (uint16_t)((payload[10] << 8) | payload[11]); // degree / 100
+                                s_state.telemetry.gps.altitude  = (uint16_t)((payload[12] << 8) | payload[13]); // m + 1000m
+                                s_state.telemetry.last_update_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                            }
+                        } else if (type == CRSF_FRAMETYPE_BATTERY) {
+                            // 8字节: voltage(2) + current(2) + capacity(3) + remaining(1)
+                            // frame_len = 10
+                            if (frame_len >= 10) {
+                                s_state.telemetry.battery.voltage   = (uint16_t)((payload[0] << 8) | payload[1]);     // V * 10
+                                s_state.telemetry.battery.current   = (uint16_t)((payload[2] << 8) | payload[3]);     // A * 10
+                                s_state.telemetry.battery.capacity  = (uint32_t)((payload[4] << 16) | (payload[5] << 8) | payload[6]); // mAh 24-bit
+                                s_state.telemetry.battery.remaining = payload[7]; // %
+                                s_state.telemetry.last_update_ms   = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                            }
+                        } else if (type == CRSF_FRAMETYPE_VARIO) {
+                            // 2字节: vSpeed(2)，大端序 cm/s
+                            // frame_len = 4
+                            if (frame_len >= 4) {
+                                s_state.telemetry.vario.vSpeed   = (int16_t)((payload[0] << 8) | payload[1]);
+                                s_state.telemetry.last_update_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                            }
+                        } else if (type == CRSF_FRAMETYPE_FLIGHT_MODE) {
+                            // 纯 ASCII 文本，以 \0 结尾
+                            uint8_t textlen = frame_len - 2; // payload 全长度
+                            if (textlen > sizeof(s_state.telemetry.flight_mode) - 1)
+                                textlen = sizeof(s_state.telemetry.flight_mode) - 1;
+                            memcpy(s_state.telemetry.flight_mode, payload, textlen);
+                            s_state.telemetry.flight_mode[textlen] = '\0';
+                            s_state.telemetry.last_update_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                            ESP_LOGI(TAG, "飞行模式: \"%s\"", s_state.telemetry.flight_mode);
                         }
                     } else {
                         s_crc_fail_frames++;
