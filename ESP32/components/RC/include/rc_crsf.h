@@ -21,8 +21,8 @@ typedef struct {
 // 回传传感器数据结构体
 typedef struct {
     struct {
-        uint16_t voltage;       // 电池电压 mV
-        uint16_t current;       // 电流 mA
+        uint16_t voltage;       // 电池电压 V*10 (如 66 = 6.6V)
+        uint16_t current;       // 电流 A*10 (如 3 = 0.3A)
         uint32_t capacity;      // 消耗容量 mAh
         uint8_t remaining;      // 剩余百分比 %
     } battery;

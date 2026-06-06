@@ -811,11 +811,12 @@ void app_main(void) {
                     if (t->last_update_ms > 0) {
                         ESP_LOGI(TAG,
                                  "📡 回传: "
-                                 "电池%umV/%umAh/%u%% "
+                                 "电池%.1fV/%.1fA/%umAh/%u%% "
                                  "GPS %.6f,%.6f %ucm %ucm/s %u° "
                                  "姿态 %.1f° %.1f° %.1f° "
                                  "气压%.0fm %+.1fm/s",
-                                 t->battery.voltage, t->battery.capacity,
+                                 (double)t->battery.voltage / 10.0,
+                                 (double)t->battery.current / 10.0, t->battery.capacity,
                                  t->battery.remaining,
                                  (double)t->gps.latitude / 1e7,
                                  (double)t->gps.longitude / 1e7,
