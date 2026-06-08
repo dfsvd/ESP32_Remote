@@ -232,6 +232,15 @@
           @save-led-config="saveLedConfig"
         />
       </section>
+
+      <!-- ===== Tab: Telemetry ===== -->
+      <section v-if="currentTab === 'telemetry'">
+        <TelemetryPanel
+          :telemetry="telemetry"
+          :status="crsfStatus"
+          :t="telemetryT"
+        />
+      </section>
     </main>
 
     <!-- WebSocket -->
@@ -266,6 +275,7 @@ import ConfigStickMode from '../components/ConfigStickMode.vue'
 import ConfigProfiles from '../components/ConfigProfiles.vue'
 import LedConfiguratorPanel from '../components/LedConfiguratorPanel.vue'
 import ChannelBar from '../components/ChannelBar.vue'
+import TelemetryPanel from '../components/TelemetryPanel.vue'
 
 const {
   ws, isConnected, currentTab, configSubTab, currentLang, simMode,
@@ -285,6 +295,7 @@ const {
   renameProfile, exportConfig, importConfig,
   importSuccess, importError, exportProfile,
   ledConfig, requestLedConfig, setLedColor, saveLedConfig,
+  telemetry,
 } = useRCState()
 
 currentLang.value = 'en'
@@ -411,10 +422,32 @@ const calT = {
   calAxisRightY: 'Right Y (Pitch)'
 }
 
+const telemetryT = {
+  flightMode: 'Flight Mode',
+  battery: 'Battery',
+  sats: 'Sats',
+  fixed: '3D Fix',
+  noGps: 'No GPS',
+  noData: 'Waiting…',
+  linkQuality: 'Link Quality',
+  disconnected: 'Disconnected',
+  attitude: 'Attitude',
+  gpsDetail: 'GPS Position',
+  altitude: 'Alt',
+  speed: 'Speed',
+  heading: 'Heading',
+  waitingGps: 'Waiting for GPS…',
+  barometer: 'Barometer',
+  baroAlt: 'Baro Alt',
+  vSpeed: 'V.Speed',
+  lastUpdate: 'Last Update',
+}
+
 const navItems = computed(() => [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'config', label: 'Config' },
-  { id: 'led', label: 'LED' }
+  { id: 'led', label: 'LED' },
+  { id: 'telemetry', label: 'Telemetry' },
 ])
 
 const configNavItems = computed(() => [

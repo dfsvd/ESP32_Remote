@@ -70,6 +70,47 @@ const availableSwitches = ['SA', 'SB', 'SC', 'SD', 'None']
 // 完整 16 通道映射原始数据 (从 MAP: 行解析)
 const fullChMap = ref(Array.from({ length: 16 }, (_, i) => i))
 
+// --- Telemetry ---
+const telemetry = ref(null)
+
+function normalizeTelemetry(raw) {
+  if (!raw) return null
+  const bat = raw.battery || {}
+  const gps = raw.gps || {}
+  const att = raw.att || {}
+  const var_ = raw.vario || {}
+
+  const alt_m = (gps.alt > 1000) ? (gps.alt - 1000) : 0
+
+  return {
+    battery: {
+      voltage: (bat.v != null) ? bat.v / 10.0 : null,
+      current: (bat.a != null) ? bat.a / 10.0 : null,
+      capacity: bat.cap != null ? bat.cap : null,
+      remaining: bat.rem != null ? bat.rem : null,
+    },
+    gps: {
+      latitude: gps.lat != null ? gps.lat / 1e7 : null,
+      longitude: gps.lon != null ? gps.lon / 1e7 : null,
+      altitude: alt_m > 0 ? alt_m : 0,
+      speed: gps.spd != null ? gps.spd / 10.0 : null,
+      heading: gps.hdg != null ? gps.hdg / 100.0 : null,
+      sats: gps.sats != null ? gps.sats : 0,
+    },
+    attitude: {
+      pitch: att.p != null ? att.p * 180.0 / 31415.9 : null,
+      roll: att.r != null ? att.r * 180.0 / 31415.9 : null,
+      yaw: att.y != null ? att.y * 180.0 / 31415.9 : null,
+    },
+    vario: {
+      altitude: var_.alt != null ? var_.alt / 100.0 : null,
+      vSpeed: var_.vs != null ? var_.vs / 100.0 : null,
+    },
+    flightMode: raw.fm || '',
+    lastUpdate: Date.now(),
+  }
+}
+
 // --- CRSF ---
 const isCrsfLoading = ref(false)
 const bindState = ref('idle') // 'idle' | 'binding' | 'ok' | 'timeout'
@@ -397,6 +438,13 @@ function onCalibrationResult(results) {
           const v = seg.split(',')
           return { r: +v[1], g: +v[2], b: +v[3], e: +v[4], brightness: +v[5], interval: +v[6] || 500 }
         })
+        return
+      }
+      if (line.startsWith('TELEMETRY:')) {
+        try {
+          const raw = JSON.parse(line.slice('TELEMETRY:'.length))
+          telemetry.value = normalizeTelemetry(raw)
+        } catch (e) { console.error('TELEMETRY parse error', e) }
         return
       }
     })
@@ -738,6 +786,7 @@ function importConfig(jsonStr) {
     epaData,
     revMask,
     ledConfig,
+    telemetry,
 
     // profile state
     profiles,

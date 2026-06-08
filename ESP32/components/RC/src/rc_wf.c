@@ -22,6 +22,7 @@ static const char *TAG = "RC_WIFI";
 static httpd_handle_t server = NULL;
 #define CRSF_STATUS_BUF_SIZE 256
 #define CRSF_MENU_BUF_SIZE 12288
+#define CRSF_TELEMETRY_BUF_SIZE 512
 static bool s_saved_crsf_half_duplex = false;
 static bool s_has_saved_crsf_link_mode = false;
 
@@ -233,6 +234,74 @@ static void json_append_escaped(char *dst, size_t dst_size, size_t *offset,
     }
 
     dst[*offset] = '\0';
+}
+
+static size_t build_crsf_telemetry_payload(char *buf, size_t buf_size) {
+    if (!buf || buf_size == 0) return 0;
+
+    crsf_telemetry_t *t = &crsf_get_state()->telemetry;
+    int written = snprintf(
+        buf, buf_size,
+        "TELEMETRY:{\"battery\":{\"v\":%u,\"a\":%u,\"cap\":%lu,\"rem\":%u},"
+        "\"gps\":{\"lat\":%ld,\"lon\":%ld,\"alt\":%u,\"spd\":%u,\"hdg\":%u,\"sats\":%u},"
+        "\"att\":{\"p\":%d,\"r\":%d,\"y\":%d},"
+        "\"vario\":{\"alt\":%d,\"vs\":%d},"
+        "\"fm\":\"%s\"}\n",
+        t->battery.voltage, t->battery.current,
+        (unsigned long)t->battery.capacity, t->battery.remaining,
+        (long)t->gps.latitude, (long)t->gps.longitude,
+        t->gps.altitude, t->gps.speed, t->gps.heading, t->gps.sats,
+        t->attitude.pitch, t->attitude.roll, t->attitude.yaw,
+        t->vario.altitude, t->vario.vSpeed,
+        t->flight_mode);
+
+    if (written < 0 || (size_t)written >= buf_size) {
+        buf[0] = '\0';
+        return 0;
+    }
+    return (size_t)written;
+}
+
+static bool crsf_telemetry_needs_broadcast(
+    crsf_telemetry_t *cur,
+    uint16_t *last_voltage, uint16_t *last_current,
+    uint32_t *last_capacity, uint8_t *last_remaining,
+    int32_t *last_lat, int32_t *last_lon,
+    uint16_t *last_alt, uint16_t *last_spd, uint16_t *last_hdg, uint8_t *last_sats,
+    int16_t *last_pitch, int16_t *last_roll, int16_t *last_yaw,
+    int16_t *last_vario_alt, int16_t *last_vario_vs,
+    char *last_fm, size_t last_fm_size)
+{
+    if (!cur) return false;
+
+    bool changed = false;
+
+    if (cur->battery.voltage != *last_voltage) { *last_voltage = cur->battery.voltage; changed = true; }
+    if (cur->battery.current != *last_current) { *last_current = cur->battery.current; changed = true; }
+    if (cur->battery.capacity != *last_capacity) { *last_capacity = cur->battery.capacity; changed = true; }
+    if (cur->battery.remaining != *last_remaining) { *last_remaining = cur->battery.remaining; changed = true; }
+
+    if (cur->gps.latitude != *last_lat) { *last_lat = cur->gps.latitude; changed = true; }
+    if (cur->gps.longitude != *last_lon) { *last_lon = cur->gps.longitude; changed = true; }
+    if (cur->gps.altitude != *last_alt) { *last_alt = cur->gps.altitude; changed = true; }
+    if (cur->gps.speed != *last_spd) { *last_spd = cur->gps.speed; changed = true; }
+    if (cur->gps.heading != *last_hdg) { *last_hdg = cur->gps.heading; changed = true; }
+    if (cur->gps.sats != *last_sats) { *last_sats = cur->gps.sats; changed = true; }
+
+    if (cur->attitude.pitch != *last_pitch) { *last_pitch = cur->attitude.pitch; changed = true; }
+    if (cur->attitude.roll != *last_roll) { *last_roll = cur->attitude.roll; changed = true; }
+    if (cur->attitude.yaw != *last_yaw) { *last_yaw = cur->attitude.yaw; changed = true; }
+
+    if (cur->vario.altitude != *last_vario_alt) { *last_vario_alt = cur->vario.altitude; changed = true; }
+    if (cur->vario.vSpeed != *last_vario_vs) { *last_vario_vs = cur->vario.vSpeed; changed = true; }
+
+    if (strncmp((const char *)cur->flight_mode, last_fm, last_fm_size) != 0) {
+        strncpy(last_fm, (const char *)cur->flight_mode, last_fm_size - 1);
+        last_fm[last_fm_size - 1] = '\0';
+        changed = true;
+    }
+
+    return changed;
 }
 
 static size_t build_crsf_status_payload(char *buf, size_t buf_size) {
@@ -1410,6 +1479,7 @@ static void ws_broadcast_task(void *arg) {
     char send_buf[512];
     char status_buf[CRSF_STATUS_BUF_SIZE];
     static char menu_buf[CRSF_MENU_BUF_SIZE];
+    static char telem_buf[CRSF_TELEMETRY_BUF_SIZE];
     httpd_ws_frame_t ws_pkt;
     memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
     ws_pkt.type = HTTPD_WS_TYPE_TEXT;
@@ -1423,6 +1493,20 @@ static void ws_broadcast_task(void *arg) {
     char last_device_name[64] = {0};
     uint8_t last_menu_loaded_params = 0xFF;
     uint8_t last_menu_total_params = 0xFF;
+
+    // 遥测增量跟踪
+    uint16_t last_t_v = 0, last_t_a = 0;
+    uint32_t last_t_cap = 0;
+    uint8_t last_t_rem = 0;
+    int32_t last_t_lat = 0, last_t_lon = 0;
+    uint16_t last_t_alt = 0, last_t_spd = 0, last_t_hdg = 0;
+    uint8_t last_t_sats = 0;
+    int16_t last_t_p = 0, last_t_r = 0, last_t_y = 0;
+    int16_t last_t_va = 0, last_t_vs = 0;
+    char last_t_fm[16] = {0};
+
+    // 遥测保活：最长 2s 无变化也强发一次
+    uint32_t last_telem_broadcast_ms = 0;
 
     // 增量发送 + 保活：数据变时立即发，最长 1.5s 不发就强制发一次防 TCP 断开
     char last_send_buf[512] = {0};
@@ -1491,6 +1575,31 @@ static void ws_broadcast_task(void *arg) {
                         ws_broadcast_text(menu_buf);
                         ESP_LOGI(TAG, "已推送 CRSF 菜单快照: %u/%u",
                                  state->loaded_params, state->total_params);
+                    }
+                }
+            }
+
+            // ---- 遥测 TELEMETRY 广播（增量 + 2s 保活） ----
+            {
+                crsf_telemetry_t *t = &state->telemetry;
+                if (t->last_update_ms > 0) {
+                    bool telem_changed = crsf_telemetry_needs_broadcast(
+                        t, &last_t_v, &last_t_a, &last_t_cap, &last_t_rem,
+                        &last_t_lat, &last_t_lon, &last_t_alt, &last_t_spd,
+                        &last_t_hdg, &last_t_sats,
+                        &last_t_p, &last_t_r, &last_t_y,
+                        &last_t_va, &last_t_vs,
+                        last_t_fm, sizeof(last_t_fm));
+
+                    uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                    bool telem_timeout = (now - last_telem_broadcast_ms >= 2000);
+
+                    if (telem_changed || telem_timeout) {
+                        last_telem_broadcast_ms = now;
+                        size_t tlen = build_crsf_telemetry_payload(telem_buf, sizeof(telem_buf));
+                        if (tlen > 0) {
+                            ws_broadcast_text(telem_buf);
+                        }
                     }
                 }
             }
@@ -1564,7 +1673,7 @@ static void start_webserver(fpv_joystick_report_t *joy) {
                               .is_websocket = true};
         httpd_register_uri_handler(server, &ws_uri);
 
-        xTaskCreate(ws_broadcast_task, "ws_broadcast", 4096, joy, 5, NULL);
+        xTaskCreate(ws_broadcast_task, "ws_broadcast", 6144, joy, 5, NULL);
     }
 }
 

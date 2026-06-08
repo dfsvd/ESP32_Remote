@@ -236,6 +236,15 @@
           @save-led-config="saveLedConfig"
         />
       </section>
+
+      <!-- ===== Tab: 遥测 ===== -->
+      <section v-if="currentTab === 'telemetry'">
+        <TelemetryPanel
+          :telemetry="telemetry"
+          :status="crsfStatus"
+          :t="telemetryT"
+        />
+      </section>
     </main>
 
     <!-- WebSocket -->
@@ -270,6 +279,7 @@ import ConfigStickMode from '../components/ConfigStickMode.vue'
 import ConfigProfiles from '../components/ConfigProfiles.vue'
 import LedConfiguratorPanel from '../components/LedConfiguratorPanel.vue'
 import ChannelBar from '../components/ChannelBar.vue'
+import TelemetryPanel from '../components/TelemetryPanel.vue'
 
 const {
   ws, isConnected, currentTab, configSubTab, currentLang, simMode,
@@ -289,6 +299,7 @@ const {
   renameProfile, exportConfig, importConfig,
   importSuccess, importError, exportProfile,
   ledConfig, requestLedConfig, setLedColor, saveLedConfig,
+  telemetry,
 } = useRCState()
 
 currentLang.value = 'zh'
@@ -415,10 +426,32 @@ const calT = {
   calAxisRightY: '右 Y (俯仰)'
 }
 
+const telemetryT = {
+  flightMode: '飞行模式',
+  battery: '电池',
+  sats: '颗卫星',
+  fixed: '已锁定',
+  noGps: '等待 GPS 定位',
+  noData: '等待数据',
+  linkQuality: '链路质量',
+  disconnected: '未连接',
+  attitude: '飞行姿态',
+  gpsDetail: 'GPS 位置',
+  altitude: '高度',
+  speed: '速度',
+  heading: '航向',
+  waitingGps: '等待 GPS 定位…',
+  barometer: '气压计',
+  baroAlt: '气压高度',
+  vSpeed: '垂直速度',
+  lastUpdate: '最后更新',
+}
+
 const navItems = computed(() => [
   { id: 'dashboard', label: '仪表盘' },
   { id: 'config', label: '配置' },
-  { id: 'led', label: '灯效' }
+  { id: 'led', label: '灯效' },
+  { id: 'telemetry', label: '遥测' },
 ])
 
 const configNavItems = computed(() => [
