@@ -811,13 +811,15 @@ void app_main(void) {
                     if (t->last_update_ms > 0) {
                         const uint16_t alt_m = (t->gps.altitude > 1000)
                                                    ? (t->gps.altitude - 1000) : 0;
+                        const double yaw_deg = (double)t->attitude.yaw * 180.0 / 31415.9;
+                        const double yaw_deg_norm = (yaw_deg < 0) ? yaw_deg + 360.0 : yaw_deg;
                         ESP_LOGI(TAG,
                                  "\n"
                                  "╔═══════════════════ CRSF 遥测 ═══════════════════\n"
                                  "║ ⚡ 电池  %.1fV / %.1fA  %umAh  %u%%\n"
                                  "║ 🛰 GPS    %.6f, %.6f\n"
                                  "║          %um  %ucm/s  %u°  %u颗\n"
-                                 "║ 📐 姿态  Pitch %+.1f°  Roll %+.1f°  Yaw %+.1f°\n"
+                                 "║ 📐 姿态  Pitch %+.1f°  Roll %+.1f°  Yaw %.1f°\n"
                                  "║ 📊 气压  %.0fm  %+.1fm/s \n"
                                  "║ 🏷 模式  %s \n"
                                  "╚══════════════════════════════════════════════════\n",
@@ -831,7 +833,7 @@ void app_main(void) {
                                  t->gps.sats,
                                  (double)t->attitude.pitch * 180.0 / 31415.9,
                                  (double)t->attitude.roll * 180.0 / 31415.9,
-                                 (double)t->attitude.yaw * 180.0 / 31415.9,
+                                 yaw_deg_norm,
                                  (double)t->vario.altitude / 100.0,
                                  (double)t->vario.vSpeed / 100.0,
                                  t->flight_mode);

@@ -600,13 +600,15 @@ static void crsf_rx_task(void *arg) {
                                 s_state.telemetry.attitude.roll  = (int16_t)((payload[2] << 8) | payload[3]);
                                 s_state.telemetry.attitude.yaw   = (int16_t)((payload[4] << 8) | payload[5]);
                                 s_state.telemetry.last_update_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
-                                ESP_LOGI(TAG, "姿态: p=%d(%+.1f°) r=%d(%+.1f°) y=%d(%+.1f°)",
+                                double _yaw_deg = (double)s_state.telemetry.attitude.yaw * 180.0 / 31415.9;
+                                if (_yaw_deg < 0) _yaw_deg += 360.0;
+                                ESP_LOGI(TAG, "姿态: p=%d(%+.1f°) r=%d(%+.1f°) y=%d(%.1f°)",
                                          s_state.telemetry.attitude.pitch,
                                          (double)s_state.telemetry.attitude.pitch * 180.0 / 31415.9,
                                          s_state.telemetry.attitude.roll,
                                          (double)s_state.telemetry.attitude.roll * 180.0 / 31415.9,
                                          s_state.telemetry.attitude.yaw,
-                                         (double)s_state.telemetry.attitude.yaw * 180.0 / 31415.9);
+                                         _yaw_deg);
                             }
                         } else if (type == CRSF_FRAMETYPE_GPS) {
                             // 15字节: lat(4) + lon(4) + speed(2) + heading(2) + alt(2) + sats(1)

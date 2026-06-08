@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-[var(--theme-bg)] text-darwin-ink flex flex-col">
     <!-- ========== Top Nav Bar ========== -->
-    <header class="sticky top-0 z-50 flex items-center h-14 px-2 sm:px-4 border-b border-[var(--theme-border)] bg-[var(--theme-header-bg)] backdrop-blur-md">
+    <header class="sticky top-0 z-50 flex items-center h-14 landscape:h-10 px-2 sm:px-4 border-b border-[var(--theme-border)] bg-[var(--theme-header-bg)] backdrop-blur-md">
       <!-- Left: Logo -->
       <div class="flex items-center gap-2 mr-3 sm:mr-6 shrink-0">
         <img src="/logo-icon.png" class="h-7 w-auto sm:hidden" alt="logo" />
@@ -59,7 +59,7 @@
     </header>
 
     <!-- ========== Main Content ========== -->
-    <main class="flex-1 p-4 lg:p-6 max-w-6xl w-full mx-auto box-border">
+    <main class="flex-1 p-4 landscape:p-2 lg:p-6 max-w-6xl w-full mx-auto box-border">
       <!-- ===== Tab: Dashboard ===== -->
       <section v-if="currentTab === 'dashboard'" class="grid gap-5">
         <!-- Device Info Cards -->

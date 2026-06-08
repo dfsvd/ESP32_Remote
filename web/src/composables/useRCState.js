@@ -99,8 +99,8 @@ function normalizeTelemetry(raw) {
     },
     attitude: {
       pitch: att.p != null ? att.p * 180.0 / 31415.9 : null,
-      roll: att.r != null ? att.r * 180.0 / 31415.9 : null,
-      yaw: att.y != null ? att.y * 180.0 / 31415.9 : null,
+      roll:  att.r != null ? att.r * 180.0 / 31415.9 : null,
+      yaw:   att.y != null ? ((att.y * 180.0 / 31415.9) % 360 + 360) % 360 : null,
     },
     vario: {
       altitude: var_.alt != null ? var_.alt / 100.0 : null,
