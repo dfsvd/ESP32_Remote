@@ -15,15 +15,6 @@ static const char *TAG = "BRIDGE";
 static TaskHandle_t s_bridge_task = NULL;
 static bridge_path_t s_bridge_path = BRIDGE_PATH_CRSF_MSP;
 
-static void usb_poll_task(void *arg) {
-    (void)arg;
-    ESP_LOGI(TAG, "USB 轮询任务已启动");
-    while (1) {
-        usb_host_cdc_poll();
-        vTaskDelay(pdMS_TO_TICKS(5));
-    }
-}
-
 static void bridge_task(void *arg) {
     uint8_t buf[1024];
     bridge_path_t path = s_bridge_path;
