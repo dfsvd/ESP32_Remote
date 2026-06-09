@@ -82,3 +82,28 @@ void crsf_send_device_ping(void);
 void crsf_request_menu_reload(void);
 void crsf_set_link_mode(bool half_duplex);
 bool crsf_is_half_duplex(void);
+
+/**
+ * @brief 发送 MSP 数据到飞控（封装为 CRSF 0x7A 帧）
+ * @param data 原始 MSP 字节流
+ * @param len  数据长度 (最大 115 字节)
+ */
+void crsf_send_msp(const uint8_t *data, size_t len);
+
+/**
+ * @brief 读取飞控返回的 MSP 响应
+ * @param buf     接收缓冲
+ * @param max_len 缓冲大小
+ * @return 实际读取的字节数，0 = 无数据
+ */
+int crsf_read_msp(uint8_t *buf, size_t max_len);
+
+/**
+ * @brief 检查是否有 MSP 响应待读取
+ */
+bool crsf_msp_available(void);
+
+/**
+ * @brief 重置 MSP 接收缓冲（如切换模式时）
+ */
+void crsf_reset_msp(void);

@@ -24,6 +24,9 @@ static const char *TAG = "CRSF_ENGINE";
 #define CRSF_FRAMETYPE_BATTERY 0x08
 #define CRSF_FRAMETYPE_VARIO 0x07
 #define CRSF_FRAMETYPE_FLIGHT_MODE 0x21
+#define CRSF_FRAMETYPE_MSP_REQ 0x7A
+#define CRSF_FRAMETYPE_MSP_RESP 0x7B
+#define CRSF_FRAMETYPE_MSP_WRITE 0x7C
 #define CRSF_PARAM_TYPE_SELECT 0x09
 #define CRSF_PARAM_TYPE_STRING 0x0A
 #define CRSF_PARAM_TYPE_FOLDER 0x0B
@@ -53,6 +56,45 @@ static uint32_t s_rx_bytes_total = 0;
 static uint32_t s_crc_ok_frames = 0;
 static uint32_t s_crc_fail_frames = 0;
 static uint32_t s_last_rc_frame_ms = 0;
+static uint32_t s_last_msp_flush_ms = 0;
+
+// ---- MSP 透穿环形缓冲 ----
+#define MSP_RINGBUF_SIZE 2048
+static uint8_t s_msp_ringbuf[MSP_RINGBUF_SIZE];
+static volatile size_t s_msp_ring_head = 0;
+static volatile size_t s_msp_ring_tail = 0;
+
+static void msp_ringbuf_write(const uint8_t *data, size_t len) {
+    for (size_t i = 0; i < len; ++i) {
+        size_t next = (s_msp_ring_head + 1) % MSP_RINGBUF_SIZE;
+        if (next == s_msp_ring_tail) {
+            ESP_LOGW(TAG, "MSP ringbuf 溢出，丢弃 %zu 字节", len - i);
+            return;
+        }
+        s_msp_ringbuf[s_msp_ring_head] = data[i];
+        s_msp_ring_head = next;
+    }
+}
+
+static size_t msp_ringbuf_read(uint8_t *buf, size_t max_len) {
+    size_t read = 0;
+    while (read < max_len && s_msp_ring_tail != s_msp_ring_head) {
+        buf[read++] = s_msp_ringbuf[s_msp_ring_tail];
+        s_msp_ring_tail = (s_msp_ring_tail + 1) % MSP_RINGBUF_SIZE;
+    }
+    return read;
+}
+
+static size_t msp_ringbuf_available(void) {
+    if (s_msp_ring_head >= s_msp_ring_tail)
+        return s_msp_ring_head - s_msp_ring_tail;
+    return MSP_RINGBUF_SIZE - (s_msp_ring_tail - s_msp_ring_head);
+}
+
+static void msp_ringbuf_reset(void) {
+    s_msp_ring_head = 0;
+    s_msp_ring_tail = 0;
+}
 
 static uint8_t crsf_crc8(const uint8_t *data, size_t len);
 static void crsf_apply_uart_inversion(bool invert);
@@ -156,6 +198,7 @@ static void crsf_reset_runtime_state(void) {
     s_force_ping_requested = true;
     s_last_link_time_ms = 0;
     s_last_rc_frame_ms = 0;
+    msp_ringbuf_reset();
 }
 
 void crsf_set_link_mode(bool half_duplex) {
@@ -303,6 +346,40 @@ void crsf_write_menu_value(uint8_t param_id, uint8_t new_value) {
     frame[6] = new_value;
     frame[7] = crsf_crc8(&frame[2], 5);
     crsf_uart_write(frame, sizeof(frame));
+}
+
+// ============= MSP 透穿 =============
+
+void crsf_send_msp(const uint8_t *data, size_t len) {
+    if (!data || len == 0 || len > 120) return;
+
+    // 0x7C MSP_WRITE 帧 (ExpressLRS 格式):
+    // [0xEE] [len] [0x7C] [dest=0xEC(RX)] [src=0xEA(Radio)] [raw_msp_bytes] [crc]
+    uint8_t frame[128];
+    uint8_t payload_len = 2 + (uint8_t)len; // dest(1) + src(1) + msp(N)
+    frame[0] = s_target_addr;               // 0xEE → TX module (UART 对端)
+    frame[1] = 1 + payload_len + 1;          // type + (dest+src+msp) + crc
+    frame[2] = CRSF_FRAMETYPE_MSP_WRITE;     // 0x7C (MSP_WRITE, ExpressLRS uplink)
+    frame[3] = 0xEC;                         // destination = CRSF_RECEIVER (RX module)
+    frame[4] = CRSF_ADDRESS_RADIO;           // 0xEA (source = Radio/ESP32)
+    memcpy(&frame[5], data, len);
+    frame[5 + len] = crsf_crc8(&frame[2], 1 + payload_len);
+    crsf_uart_write(frame, 5 + len + 1);
+    ESP_LOGI(TAG, "MSP_WRITE ➡ %zu bytes [%02x %02x %02x ...] -> 0x7C",
+             len, len >= 1 ? data[0] : 0, len >= 2 ? data[1] : 0, len >= 3 ? data[2] : 0);
+}
+
+int crsf_read_msp(uint8_t *buf, size_t max_len) {
+    if (!buf || max_len == 0) return 0;
+    return (int)msp_ringbuf_read(buf, max_len);
+}
+
+bool crsf_msp_available(void) {
+    return msp_ringbuf_available() > 0;
+}
+
+void crsf_reset_msp(void) {
+    msp_ringbuf_reset();
 }
 
 static void crsf_tx_task(void *arg) {
@@ -600,15 +677,15 @@ static void crsf_rx_task(void *arg) {
                                 s_state.telemetry.attitude.roll  = (int16_t)((payload[2] << 8) | payload[3]);
                                 s_state.telemetry.attitude.yaw   = (int16_t)((payload[4] << 8) | payload[5]);
                                 s_state.telemetry.last_update_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
-                                double _yaw_deg = (double)s_state.telemetry.attitude.yaw * 180.0 / 31415.9;
-                                if (_yaw_deg < 0) _yaw_deg += 360.0;
-                                ESP_LOGI(TAG, "姿态: p=%d(%+.1f°) r=%d(%+.1f°) y=%d(%.1f°)",
-                                         s_state.telemetry.attitude.pitch,
-                                         (double)s_state.telemetry.attitude.pitch * 180.0 / 31415.9,
-                                         s_state.telemetry.attitude.roll,
-                                         (double)s_state.telemetry.attitude.roll * 180.0 / 31415.9,
-                                         s_state.telemetry.attitude.yaw,
-                                         _yaw_deg);
+                                // double _yaw_deg = (double)s_state.telemetry.attitude.yaw * 180.0 / 31415.9;
+                                // if (_yaw_deg < 0) _yaw_deg += 360.0;
+                                // ESP_LOGI(TAG, "姿态: p=%d(%+.1f°) r=%d(%+.1f°) y=%d(%.1f°)",
+                                //          s_state.telemetry.attitude.pitch,
+                                //          (double)s_state.telemetry.attitude.pitch * 180.0 / 31415.9,
+                                //          s_state.telemetry.attitude.roll,
+                                //          (double)s_state.telemetry.attitude.roll * 180.0 / 31415.9,
+                                //          s_state.telemetry.attitude.yaw,
+                                //          _yaw_deg);
                             }
                         } else if (type == CRSF_FRAMETYPE_GPS) {
                             // 15字节: lat(4) + lon(4) + speed(2) + heading(2) + alt(2) + sats(1)
@@ -647,7 +724,18 @@ static void crsf_rx_task(void *arg) {
                             memcpy(s_state.telemetry.flight_mode, payload, textlen);
                             s_state.telemetry.flight_mode[textlen] = '\0';
                             s_state.telemetry.last_update_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
-                            ESP_LOGI(TAG, "飞行模式: \"%s\"", s_state.telemetry.flight_mode);
+                            // ESP_LOGI(TAG, "飞行模式: \"%s\"", s_state.telemetry.flight_mode);
+                        } else if (type == CRSF_FRAMETYPE_MSP_RESP) {
+                            // payload[0..1] = sender(1) + rcvr(1), payload[2..] = MSP data
+                            size_t msp_len = frame_len - 4;
+                            if (msp_len > 0) {
+                                msp_ringbuf_write(&payload[2], msp_len);
+                                ESP_LOGI(TAG, "MSP_RESP ⬅ %zu bytes [%02x %02x %02x ...]",
+                                         msp_len,
+                                         msp_len >= 1 ? payload[2] : 0,
+                                         msp_len >= 2 ? payload[3] : 0,
+                                         msp_len >= 3 ? payload[4] : 0);
+                            }
                         }
                     } else {
                         s_crc_fail_frames++;

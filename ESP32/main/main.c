@@ -17,7 +17,9 @@
 #include "nvs_flash.h"
 #include "rc_audio.h"
 #include "rc_ble.h"
+#include "rc_bridge.h"
 #include "rc_crsf.h"
+#include "rc_usb_host.h"
 #include "rc_led.h"
 #include "rc_read.h"
 #include "rc_usb.h"
@@ -54,6 +56,7 @@ static const char *TAG = "FPV_RC";
 #define BOOT_STICK_UP_THRESH 1300         // 右摇杆上打阈值 (<此值)
 #define BOOT_STICK_DOWN_THRESH 1700       // 右摇杆下打阈值 (>此值)
 #define BOOT_STICK_RIGHT_THRESH 1700      // 右摇杆右打阈值 (>此值)
+#define BOOT_STICK_LEFT_THRESH 1300       // 右摇杆左打阈值 (<此值)
 #define BOOT_DEBOUNCE_MS 80               // 按键消抖时间
 
 // ---- RSSI 信号阈值 ----
@@ -71,17 +74,19 @@ typedef enum {
     BOOT_MODE_USB_XBOX,      // USB Xbox 360 手柄
     BOOT_MODE_BLE_FPV,       // 蓝牙 FPV HID 手柄
     BOOT_MODE_WIFI,          // WiFi AP + WebSocket
+    BOOT_MODE_PASSTHROUGH,   // BLE NUS 透穿调参 (BLE UART ↔ CRSF MSP)
     BOOT_MODE_UNKNOWN = -1,  // 用户未做选择
 } boot_mode_t;
 
 static const char *boot_mode_name(boot_mode_t m) {
     switch (m) {
-    case BOOT_MODE_RF:       return "纯射频";
-    case BOOT_MODE_USB_FPV:  return "USB FPV";
-    case BOOT_MODE_USB_XBOX: return "USB Xbox";
-    case BOOT_MODE_BLE_FPV:  return "蓝牙 FPV";
-    case BOOT_MODE_WIFI:     return "WiFi AP";
-    default:                 return "未知";
+    case BOOT_MODE_RF:         return "纯射频";
+    case BOOT_MODE_USB_FPV:    return "USB FPV";
+    case BOOT_MODE_USB_XBOX:   return "USB Xbox";
+    case BOOT_MODE_BLE_FPV:    return "蓝牙 FPV";
+    case BOOT_MODE_WIFI:       return "WiFi AP";
+    case BOOT_MODE_PASSTHROUGH: return "透穿调参";
+    default:                   return "未知";
     }
 }
 
@@ -407,7 +412,7 @@ static boot_mode_t detect_boot_mode(void) {
             audio_play(SOUND_MODESW);
             ESP_LOGI(
                 TAG,
-                ">> 进入模式选择: 上=USB, 下=BLE, 右=RF, SD=WiFi (超时 %dms)",
+                ">> 模式选择: 上=USB, 下=BLE, 右=RF, 左=透穿, SD=WiFi (超时 %dms)",
                 BOOT_STICK_SELECT_TIMEOUT_MS);
             uint32_t sel_start =
                 (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
@@ -445,6 +450,11 @@ static boot_mode_t detect_boot_mode(void) {
                     ESP_LOGI(TAG, ">> 右摇杆右 → 进入纯射频模式");
                     audio_play_wait(SOUND_RFMOD, 5000);
                     return BOOT_MODE_RF;
+                }
+                if (roll < BOOT_STICK_LEFT_THRESH) {
+                    ESP_LOGI(TAG, ">> 右摇杆左 → 进入透穿调参模式");
+                    audio_play_wait(SOUND_WIFIMD, 5000);
+                    return BOOT_MODE_PASSTHROUGH;
                 }
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
@@ -583,21 +593,18 @@ void app_main(void) {
     /* ---- 5. LED 初始化 ---- */
     led_init();
 
-    /* ---- 6. 开机模式检测 ---- */
-    boot_mode_t mode = detect_boot_mode();
-    if (mode == BOOT_MODE_UNKNOWN) {
-        mode = get_default_mode();
-        ESP_LOGI(TAG, ">> 用户未主动选择，使用默认模式: %s",
-                 boot_mode_name(mode));
-    } else {
-        ESP_LOGI(TAG, ">> 开机模式: %s", boot_mode_name(mode));
-    }
+    /* ---- 6. 开机模式检测 (强制透穿调参模式, 跳过摇杆选择) ---- */
+    boot_mode_t mode = BOOT_MODE_PASSTHROUGH;
+    ESP_LOGI(TAG, ">> 强制开机模式: %s", boot_mode_name(mode));
 
     /* ---- 7. 按模式选择性初始化硬件 ---- */
+    const bool passthrough_mode = (mode == BOOT_MODE_PASSTHROUGH);
     const bool crsf_needed = (mode == BOOT_MODE_RF ||
                               mode == BOOT_MODE_WIFI);
     const bool crsf_always_sync = (mode == BOOT_MODE_WIFI);
     const bool use_ble = (mode == BOOT_MODE_BLE_FPV);
+    const bool use_ble_nus = passthrough_mode;
+    const bool use_usb_host = passthrough_mode;
 
     if (crsf_needed) {
         crsf_config_t crsf_cfg = {
@@ -631,9 +638,12 @@ void app_main(void) {
         rc_wifi_server_init(&joy);
     }
 
-    if (use_ble) {
-        // BLE 初始化使用 joy 指针，必须先于主循环
-        ble_init(&joy);
+    if (use_ble_nus) {
+        // 最小化测试: 只开 USB Host + 发送捕获的 MSP 序列, 不启动 BLE 和桥接
+        usb_host_cdc_init();
+    } else if (use_ble) {
+        // BLE HID 初始化
+        ble_init(&joy, BLE_MODE_HID);
     }
 
     if (mode == BOOT_MODE_USB_XBOX) {
@@ -657,6 +667,10 @@ void app_main(void) {
     case BOOT_MODE_USB_FPV:
         led_set_mode(LED_MODE_USB_HID);
         audio_play(SOUND_FPVMOD);
+        break;
+    case BOOT_MODE_PASSTHROUGH:
+        led_set_mode(LED_MODE_BLE);
+        audio_play(SOUND_WIFIMD);
         break;
     case BOOT_MODE_RF:
     default:
@@ -803,6 +817,7 @@ void app_main(void) {
                 printed_full_snapshot = false;
 
             /* --- 回传数据状态打印（5秒间隔） --- */
+#if 0
             {
                 static uint32_t s_last_telem_print = 0;
                 if (now_ms - s_last_telem_print >= 5000) {
@@ -840,6 +855,7 @@ void app_main(void) {
                     }
                 }
             }
+#endif
 
             crsf_send_device_ping();
         }

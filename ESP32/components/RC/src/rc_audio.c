@@ -318,8 +318,8 @@ static void audio_playback(play_request_t *req) {
     size_t mono_offset = 0;
     float duration = (float)data_size / fmt->byte_rate;
 
-    ESP_LOGI(TAG, "▶ %s (%s) prio=%d %.2fs", s_names[req->id],
-             s_names_cn[req->id], req->priority, duration);
+    // ESP_LOGI(TAG, "▶ %s (%s) prio=%d %.2fs", s_names[req->id],
+    //          s_names_cn[req->id], req->priority, duration);
 
     s_playing = true;
     s_stop_req = false;
@@ -389,7 +389,7 @@ static void audio_playback(play_request_t *req) {
     }
 
     /* 数据全部送入 DMA，等待排空 */
-    ESP_LOGI(TAG, "□ %s — 播完", s_names[req->id]);
+    // ESP_LOGI(TAG, "□ %s — 播完", s_names[req->id]);
     vTaskDelay(pdMS_TO_TICKS(500));
 
 done:

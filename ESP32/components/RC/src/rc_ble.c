@@ -34,6 +34,7 @@ void ble_store_config_init(void);
 #define BLE_HID_PROTOCOL_MODE_REPORT 0x01
 #define BLE_HID_MAX_BONDS 4
 #define BLE_HID_DEVICE_INFO_PNP_LEN 7
+#define NUS_RX_STREAM_SIZE 1024
 
 typedef struct __attribute__((packed)) {
     uint16_t x;
@@ -84,6 +85,12 @@ static const ble_hid_report_ref_t s_input_report_ref = {
 static uint8_t s_pnp_id[BLE_HID_DEVICE_INFO_PNP_LEN] = {
     0x02, 0x3A, 0x30, 0x01, 0x40, 0x00, 0x01,
 };
+
+// ---- NUS (Nordic UART Service) 透穿 ----
+static bool s_nus_subscribed = false;
+static StreamBufferHandle_t s_nus_rx_stream = NULL;
+static uint16_t s_nus_tx_val_handle = 0;
+static ble_mode_t s_ble_mode = BLE_MODE_HID;
 
 static const uint8_t s_report_map[] = {
     0x05,
@@ -158,6 +165,15 @@ static const ble_uuid16_t s_hid_control_uuid = BLE_UUID16_INIT(0x2A4C);
 static const ble_uuid16_t s_report_uuid = BLE_UUID16_INIT(0x2A4D);
 static const ble_uuid16_t s_protocol_mode_uuid = BLE_UUID16_INIT(0x2A4E);
 static const ble_uuid16_t s_report_ref_uuid = BLE_UUID16_INIT(0x2908);
+
+// ---- CC2541/HM-10 风格 16-bit BLE UART UUID ----
+// 与 Betaflight Configurator devices.js 中的 CC2541 配置兼容:
+//   Service: 0xFFE0
+//   Write (手机→设备):  0xFFE1  → 我们作为 RX 接收
+//   Notify (设备→手机): 0xFFE2  → 我们作为 TX 发送
+static const ble_uuid16_t s_nus_service_uuid = BLE_UUID16_INIT(0xFFE0);
+static const ble_uuid16_t s_nus_rx_char_uuid = BLE_UUID16_INIT(0xFFE1);
+static const ble_uuid16_t s_nus_tx_char_uuid = BLE_UUID16_INIT(0xFFE2);
 
 static uint16_t ble_clamp_channel(uint16_t value) {
     if (value < 1000) {
@@ -356,6 +372,38 @@ static int ble_report_ref_descriptor_access(uint16_t conn_handle,
 
 static int ble_gap_event(struct ble_gap_event *event, void *arg);
 
+// ---- NUS 访问回调 ----
+static int ble_nus_tx_access(uint16_t conn_handle, uint16_t attr_handle,
+                              struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    (void)conn_handle;
+    (void)attr_handle;
+    (void)arg;
+    if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+        return 0; // 无数据可读，仅指示成功
+    }
+    return BLE_ATT_ERR_UNLIKELY;
+}
+
+static int ble_nus_rx_access(uint16_t conn_handle, uint16_t attr_handle,
+                              struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    (void)conn_handle;
+    (void)attr_handle;
+    (void)arg;
+    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
+        if (len > 0 && s_nus_rx_stream) {
+            uint8_t buf[NUS_RX_STREAM_SIZE];
+            uint16_t copy_len = len < sizeof(buf) ? len : sizeof(buf);
+            if (os_mbuf_copydata(ctxt->om, 0, copy_len, buf) == 0) {
+                size_t written = xStreamBufferSend(s_nus_rx_stream, buf, copy_len, 0);
+                ESP_LOGI(TAG, "NUS RX: %u/%u bytes -> stream buf", written, copy_len);
+            }
+        }
+        return 0;
+    }
+    return BLE_ATT_ERR_UNLIKELY;
+}
+
 static struct ble_gatt_dsc_def s_input_report_descriptors[] = {
     {
         .uuid = &s_report_ref_uuid.u,
@@ -411,7 +459,24 @@ static const struct ble_gatt_chr_def s_hid_characteristics[] = {
     {0},
 };
 
-static const struct ble_gatt_svc_def s_gatt_svcs[] = {
+// ---- NUS 特征和服务 ----
+static const struct ble_gatt_chr_def s_nus_characteristics[] = {
+    {
+        .uuid = &s_nus_tx_char_uuid.u,
+        .access_cb = ble_nus_tx_access,
+        .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+        .val_handle = &s_nus_tx_val_handle,
+    },
+    {
+        .uuid = &s_nus_rx_char_uuid.u,
+        .access_cb = ble_nus_rx_access,
+        .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+    },
+    {0},
+};
+
+// ---- HID 模式 GATT 表 ----
+static const struct ble_gatt_svc_def s_gatt_svcs_hid[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
         .uuid = &s_dis_service_uuid.u,
@@ -425,22 +490,46 @@ static const struct ble_gatt_svc_def s_gatt_svcs[] = {
     {0},
 };
 
+// ---- NUS 模式 GATT 表 ----
+// DIS 由 ble_svc_dis_init() 自动注册，此处只注册 NUS
+static const struct ble_gatt_svc_def s_gatt_svcs_nus[] = {
+    {
+        .type = BLE_GATT_SVC_TYPE_PRIMARY,
+        .uuid = &s_nus_service_uuid.u,
+        .characteristics = s_nus_characteristics,
+    },
+    {0},
+};
+
 static void ble_start_advertising(void) {
     struct ble_hs_adv_fields fields = {0};
     struct ble_gap_adv_params params = {0};
-    ble_uuid16_t hid_uuid = BLE_UUID16_INIT(0x1812);
     const char *name = BLE_HID_DEVICE_NAME;
     int rc;
 
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.uuids16 = &hid_uuid;
-    fields.num_uuids16 = 1;
-    fields.uuids16_is_complete = 1;
-    fields.appearance = BLE_HID_APPEARANCE_GAMEPAD;
-    fields.appearance_is_present = 1;
-    fields.name = (uint8_t *)name;
-    fields.name_len = strlen(name);
-    fields.name_is_complete = 1;
+
+    if (s_ble_mode == BLE_MODE_NUS) {
+        // NUS 模式：广播 16-bit UUID (4B)，设备名也放进广播包 (31B 足够)
+        fields.uuids16 = (ble_uuid16_t *)&s_nus_service_uuid;
+        fields.num_uuids16 = 1;
+        fields.uuids16_is_complete = 1;
+        fields.name = (uint8_t *)name;
+        fields.name_len = strlen(name);
+        fields.name_is_complete = 1;
+    } else {
+        // HID 模式：16-bit UUID + 设备名总小，都在广播包中
+        ble_uuid16_t hid_uuid = BLE_UUID16_INIT(0x1812);
+        fields.uuids16 = &hid_uuid;
+        fields.num_uuids16 = 1;
+        fields.uuids16_is_complete = 1;
+        fields.appearance = BLE_HID_APPEARANCE_GAMEPAD;
+        fields.appearance_is_present = 1;
+
+        fields.name = (uint8_t *)name;
+        fields.name_len = strlen(name);
+        fields.name_is_complete = 1;
+    }
 
     rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
@@ -460,7 +549,8 @@ static void ble_start_advertising(void) {
         return;
     }
 
-    ESP_LOGI(TAG, "BLE advertising started");
+    ESP_LOGI(TAG, "BLE advertising started (mode=%s)",
+             s_ble_mode == BLE_MODE_NUS ? "NUS" : "HID");
 }
 
 static int ble_gap_event(struct ble_gap_event *event, void *arg) {
@@ -517,6 +607,11 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
             ESP_LOGI(TAG, "BLE input notify %s",
                      s_subscribed ? "enabled" : "disabled");
         }
+        if (event->subscribe.attr_handle == s_nus_tx_val_handle) {
+            s_nus_subscribed = event->subscribe.cur_notify;
+            ESP_LOGI(TAG, "NUS TX notify %s",
+                     s_nus_subscribed ? "enabled" : "disabled");
+        }
         return 0;
 
     case BLE_GAP_EVENT_ENC_CHANGE:
@@ -568,6 +663,8 @@ static void ble_on_sync(void) {
         ESP_LOGE(TAG, "BLE infer addr type failed: %d", rc);
         return;
     }
+
+    ESP_LOGI(TAG, "BLE synced, NUS TX handle=%d", s_nus_tx_val_handle);
 
     ble_start_advertising();
 }
@@ -638,23 +735,35 @@ void ble_update_input(const fpv_joystick_report_t *joy) {
     xQueueOverwrite(s_input_queue, joy);
 }
 
-void ble_init(fpv_joystick_report_t *joy) {
+void ble_init(fpv_joystick_report_t *joy, ble_mode_t mode) {
     esp_err_t ret;
     int rc;
 
+    s_ble_mode = mode;
     s_connected = false;
     s_paired = false;
     s_subscribed = false;
+    s_nus_subscribed = false;
     s_ready_to_send = false;
     s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
     s_report_chr_val_handle = 0;
-    s_latest_joy = *joy;
+    s_nus_tx_val_handle = 0;
 
-    if (s_input_queue == NULL) {
-        s_input_queue = xQueueCreate(1, sizeof(fpv_joystick_report_t));
-        configASSERT(s_input_queue != NULL);
+    if (mode == BLE_MODE_NUS) {
+        // NUS 模式：不初始化 HID 队列和发送任务
+        if (s_nus_rx_stream == NULL) {
+            s_nus_rx_stream = xStreamBufferCreate(NUS_RX_STREAM_SIZE, 1);
+            configASSERT(s_nus_rx_stream != NULL);
+        }
+    } else {
+        // HID 模式：初始化 HID 队列和发送任务
+        if (s_input_queue == NULL) {
+            s_input_queue = xQueueCreate(1, sizeof(fpv_joystick_report_t));
+            configASSERT(s_input_queue != NULL);
+        }
+        s_latest_joy = *joy;
+        ble_update_input(joy);
     }
-    ble_update_input(joy);
 
     // ret = nvs_flash_init();
     // if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret ==
@@ -691,21 +800,60 @@ void ble_init(fpv_joystick_report_t *joy) {
     ble_svc_dis_serial_number_set("000001");
     ble_svc_dis_pnp_id_set((char *)s_pnp_id);
 
-    rc = ble_gatts_count_cfg(s_gatt_svcs);
-    ESP_ERROR_CHECK(rc);
-    rc = ble_gatts_add_svcs(s_gatt_svcs);
-    ESP_ERROR_CHECK(rc);
+    // 按模式注册对应的 GATT 表
+    const struct ble_gatt_svc_def *svcs =
+        (mode == BLE_MODE_NUS) ? s_gatt_svcs_nus : s_gatt_svcs_hid;
+    rc = ble_gatts_count_cfg(svcs);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "GATT count failed: %d", rc);
+    } else {
+        ESP_LOGI(TAG, "GATT count ok (pre-register NUS TX handle=%d)",
+                 s_nus_tx_val_handle);
+    }
+    rc = ble_gatts_add_svcs(svcs);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "GATT add failed: %d", rc);
+    } else {
+        ESP_LOGI(TAG, "GATT add ok, NUS TX handle=%d",
+                 s_nus_tx_val_handle);
+    }
 
-    if (s_ble_send_task_handle == NULL) {
-        xTaskCreatePinnedToCore(
-            ble_send_task, "ble_hid", BLE_HID_SEND_TASK_STACK, NULL,
-            BLE_HID_TASK_PRIORITY, &s_ble_send_task_handle, tskNO_AFFINITY);
+    if (mode != BLE_MODE_NUS) {
+        // HID 模式：创建 BLE 发送任务
+        if (s_ble_send_task_handle == NULL) {
+            xTaskCreatePinnedToCore(
+                ble_send_task, "ble_hid", BLE_HID_SEND_TASK_STACK, NULL,
+                BLE_HID_TASK_PRIORITY, &s_ble_send_task_handle, tskNO_AFFINITY);
+        }
     }
 
     nimble_port_freertos_init(ble_host_task);
-    ESP_LOGI(TAG, "BLE HID initialized with NimBLE");
+    ESP_LOGI(TAG, "BLE initialized: mode=%s",
+             mode == BLE_MODE_NUS ? "NUS" : "HID");
 }
 
 bool ble_is_connected(void) { return s_connected; }
 
 bool ble_is_paired(void) { return s_paired; }
+
+// ============= BLE UART (NUS) API =============
+
+bool ble_uart_is_subscribed(void) { return s_nus_subscribed; }
+
+int ble_uart_read(uint8_t *buf, size_t max_len) {
+    if (!buf || max_len == 0 || !s_nus_rx_stream) return 0;
+    return (int)xStreamBufferReceive(s_nus_rx_stream, buf, max_len, 0);
+}
+
+void ble_uart_send(const uint8_t *data, size_t len) {
+    if (!data || len == 0 || !s_nus_subscribed || s_nus_tx_val_handle == 0) {
+        return;
+    }
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(data, len);
+    if (!om) return;
+    int rc = ble_gatts_notify_custom(s_conn_handle, s_nus_tx_val_handle, om);
+    if (rc != 0 && rc != BLE_HS_EDONE && rc != BLE_HS_ENOTCONN &&
+        rc != BLE_HS_EBUSY) {
+        ESP_LOGW(TAG, "NUS TX notify failed: %d", rc);
+    }
+}
