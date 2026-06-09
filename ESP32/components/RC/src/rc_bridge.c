@@ -10,11 +10,9 @@ static const char *TAG = "BRIDGE";
 #define BRIDGE_TASK_STACK 4096
 #define BRIDGE_TASK_PRIORITY 4
 #define BRIDGE_POLL_MS 10
-#define USB_POLL_TASK_STACK 4096
-#define USB_POLL_TASK_PRIORITY 3
+#define BLE_SAFE_PAYLOAD 240
 
 static TaskHandle_t s_bridge_task = NULL;
-static TaskHandle_t s_usb_poll_task = NULL;
 static bridge_path_t s_bridge_path = BRIDGE_PATH_CRSF_MSP;
 
 static void usb_poll_task(void *arg) {
@@ -43,18 +41,24 @@ static void bridge_task(void *arg) {
             // 方向 A: BLE (手机) → USB (飞控)
             int n = ble_uart_read(buf, sizeof(buf));
             if (n > 0) {
-                ESP_LOGI(TAG, "→ USB: %d bytes [%02x %02x %02x ...]", n,
-                         n >= 1 ? buf[0] : 0, n >= 2 ? buf[1] : 0, n >= 3 ? buf[2] : 0);
+                ESP_LOGI(TAG, "→ USB: %d bytes", n);
                 usb_host_cdc_write(buf, (size_t)n);
             }
 
-            // 方向 B: USB (飞控) → BLE (手机)
+            // 方向 B: USB (飞控) → BLE (手机): MTU 分片 + 拥塞控制
             if (usb_host_cdc_available()) {
-                n = usb_host_cdc_read(buf, sizeof(buf));
+                uint8_t usb_buf[512];
+                n = usb_host_cdc_read(usb_buf, sizeof(usb_buf));
                 if (n > 0) {
-                    ESP_LOGI(TAG, "→ BLE: %d bytes [%02x %02x %02x ...]", n,
-                             n >= 1 ? buf[0] : 0, n >= 2 ? buf[1] : 0, n >= 3 ? buf[2] : 0);
-                    ble_uart_send(buf, (size_t)n);
+                    int sent = 0;
+                    while (sent < n) {
+                        int chunk = (n - sent > BLE_SAFE_PAYLOAD) ? BLE_SAFE_PAYLOAD : (n - sent);
+                        ble_uart_send(usb_buf + sent, chunk);
+                        sent += chunk;
+                        // 小延时防止 BLE 队列溢出
+                        vTaskDelay(pdMS_TO_TICKS(1));
+                    }
+                    ESP_LOGI(TAG, "→ BLE: %d bytes (分片=%d包)", n, (n + BLE_SAFE_PAYLOAD - 1) / BLE_SAFE_PAYLOAD);
                 }
             }
 
@@ -94,11 +98,7 @@ void bridge_start(bridge_path_t path) {
                             BRIDGE_TASK_PRIORITY, &s_bridge_task, 1);
     ESP_LOGI(TAG, "桥接任务已创建 (path=%s)",
              path == BRIDGE_PATH_USB_CDC ? "USB_CDC" : "CRSF_MSP");
-    if (path == BRIDGE_PATH_USB_CDC) {
-        // USB 轮询任务放到独立任务，避免 bridge 卡顿
-        xTaskCreatePinnedToCore(usb_poll_task, "usb_poll", USB_POLL_TASK_STACK, NULL,
-                                USB_POLL_TASK_PRIORITY, &s_usb_poll_task, 0);
-    }
+    // USB 轮询任务由 usb_host_cdc_init() 创建, 此处不重复创建
 }
 
 void bridge_stop(void) {

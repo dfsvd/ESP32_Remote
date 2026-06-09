@@ -639,8 +639,9 @@ void app_main(void) {
     }
 
     if (use_ble_nus) {
-        // 最小化测试: 只开 USB Host + 发送捕获的 MSP 序列, 不启动 BLE 和桥接
+        ble_init(&joy, BLE_MODE_NUS);
         usb_host_cdc_init();
+        bridge_start(BRIDGE_PATH_USB_CDC);
     } else if (use_ble) {
         // BLE HID 初始化
         ble_init(&joy, BLE_MODE_HID);

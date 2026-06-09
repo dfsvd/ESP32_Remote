@@ -15,6 +15,7 @@
 #include "class/cdc/cdc_host.h"
 #include "esp_private/usb_phy.h"
 #include "dwc2_forward.h"
+#include "freertos/stream_buffer.h"
 
 static const char *TAG = "USB_HOST";
 
@@ -24,10 +25,16 @@ static uint8_t s_cdc_rx_buf[CDC_RINGBUF_SIZE];
 static volatile size_t s_cdc_rx_head = 0;
 static volatile size_t s_cdc_rx_tail = 0;
 static volatile bool s_cdc_mounted = false;
-static uint8_t s_bulk_out_ep = 0;    // 手动打开的端点地址
+static bool s_cdc_inited = false;
+static uint32_t s_mount_time = 0;
+static uint8_t s_cdc_dev_addr = 0;          // 飞控 USB 设备地址 (动态获取)
+static uint8_t s_bulk_out_ep = 0;
 static uint8_t s_bulk_in_ep = 0;
 static uint8_t s_async_rx_buf[64];
-static uint8_t s_usb_tx_buf[64];    // DMA 安全 TX 缓冲 (不能放 Flash 中的 const 数据)
+static uint8_t s_usb_tx_buf[64];
+static volatile bool s_bulk_out_busy = false;
+static volatile bool s_bulk_in_inflight = false;
+static StreamBufferHandle_t s_tx_stream = NULL; // 跨任务 TX 队列
 
 static void cdc_ringbuf_write(const uint8_t *data, size_t len) {
     for (size_t i = 0; i < len; ++i) {
@@ -73,18 +80,24 @@ static void usb_poll_task(void *arg) {
 // ============= TinyUSB Host CDC ACM 回调 =============
 
 void tuh_cdc_mount_cb(uint8_t idx) {
-    ESP_LOGI(TAG, "CDC ACM 设备挂载 idx=%d", idx);
+    // 获取动态设备地址 (热插拔后可能变化)
+    tuh_itf_info_t info;
+    s_cdc_dev_addr = tuh_cdc_itf_get_info(idx, &info) ? info.daddr : 1;
+    ESP_LOGI(TAG, "CDC ACM 挂载 idx=%d daddr=%d", idx, s_cdc_dev_addr);
     s_cdc_mounted = true;
+    s_cdc_inited = false;
+    s_mount_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
     cdc_ringbuf_reset();
-
-    // 延迟 500ms 再初始化，让飞控 USB 栈先稳定
-    // 实际初始化移至 poll 函数中延迟执行
-    ESP_LOGI(TAG, "挂载完成，延迟初始化... (等待设备就绪)");
 }
 
 void tuh_cdc_umount_cb(uint8_t idx) {
     ESP_LOGW(TAG, "CDC ACM 设备卸载 idx=%d", idx);
     s_cdc_mounted = false;
+    s_cdc_inited = false;
+    s_bulk_out_busy = false;
+    s_bulk_in_inflight = false;
+    s_bulk_out_ep = 0;
+    s_bulk_in_ep = 0;
 }
 
 void tuh_cdc_rx_cb(uint8_t idx) {
@@ -106,22 +119,23 @@ void tuh_cdc_rx_cb(uint8_t idx) {
 
 // Bulk TX 完成回调
 static void usb_host_tx_cb(tuh_xfer_t *xfer) {
+    s_bulk_out_busy = false; // 释放 TX 锁
     if (xfer->result != XFER_RESULT_SUCCESS) {
-        ESP_LOGE(TAG, "Bulk TX 失败! result=%d (端点可能不存在)", xfer->result);
+        ESP_LOGD(TAG, "Bulk TX 异常: result=%d", xfer->result);
     }
 }
 
 // 异步 Bulk IN 完成回调 — 飞控回复数据后调用
 static void usb_host_rx_cb(tuh_xfer_t *xfer) {
+    s_bulk_in_inflight = false; // 标记 RX 链落地
+
     if (xfer->result == XFER_RESULT_SUCCESS && xfer->actual_len > 0) {
-        // xfer->buffer 在回调中可能为 NULL, 数据实际在 s_async_rx_buf 里
         cdc_ringbuf_write(s_async_rx_buf, xfer->actual_len);
-        ESP_LOGI(TAG, "Bulk RX: %lu bytes [%02x %02x %02x ...]",
-                 (unsigned long)xfer->actual_len,
-                 s_async_rx_buf[0], s_async_rx_buf[1], s_async_rx_buf[2]);
+    } else if (xfer->result != XFER_RESULT_SUCCESS) {
+        ESP_LOGD(TAG, "Bulk RX 异常: result=%d", xfer->result);
     }
 
-    // 重挂 IN 传输，保持连续接收
+    // 重挂 IN 传输
     if (s_cdc_mounted && s_bulk_in_ep) {
         tuh_xfer_t in_xfer = {
             .daddr = xfer->daddr,
@@ -131,7 +145,7 @@ static void usb_host_rx_cb(tuh_xfer_t *xfer) {
             .complete_cb = usb_host_rx_cb,
             .user_data = 0,
         };
-        tuh_edpt_xfer(&in_xfer);
+        s_bulk_in_inflight = tuh_edpt_xfer(&in_xfer);
     }
 }
 
@@ -140,7 +154,22 @@ static void usb_host_rx_cb(tuh_xfer_t *xfer) {
 void usb_host_cdc_init(void) {
     ESP_LOGI(TAG, "初始化 USB Host (CDC ACM 透穿)");
 
-    // 1. 配置 USB PHY 为 Host 模式
+    // 创建 TX 流缓冲 (跨任务安全)
+    if (s_tx_stream == NULL) {
+        s_tx_stream = xStreamBufferCreate(1024, 1);
+    }
+
+    // 1. 冷启动修复：先拉低 USB 总线 (GPIO 19=D-, 20=D+)，模拟设备未插入
+    //    解决插着线开机/烧录后 PHY 检测不到上升沿的问题
+    gpio_reset_pin(19);
+    gpio_reset_pin(20);
+    gpio_set_direction(19, GPIO_MODE_OUTPUT);
+    gpio_set_direction(20, GPIO_MODE_OUTPUT);
+    gpio_set_level(19, 0);
+    gpio_set_level(20, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+
+    // 2. 配置 USB PHY 为 Host 模式 (接管 GPIO 19/20)
     usb_phy_handle_t phy_handle = NULL;
     const usb_phy_config_t phy_config = {
         .controller = USB_PHY_CTRL_OTG,
@@ -191,25 +220,11 @@ int usb_host_cdc_read(uint8_t *buf, size_t max_len) {
 }
 
 int usb_host_cdc_write(const uint8_t *data, size_t len) {
-    if (!data || len == 0 || !usb_host_cdc_connected() || !s_bulk_out_ep) return 0;
-    if (len > sizeof(s_usb_tx_buf)) len = sizeof(s_usb_tx_buf);
-
-    // DMA 无法直接读取 Flash const 数据，必须拷贝到 RAM
-    memcpy(s_usb_tx_buf, data, len);
-
-    tuh_xfer_t out_xfer = {
-        .daddr = 1,
-        .ep_addr = s_bulk_out_ep,
-        .buffer = s_usb_tx_buf,
-        .buflen = (uint16_t)len,
-        .complete_cb = usb_host_tx_cb,
-        .user_data = 0,
-    };
-    bool ok = tuh_edpt_xfer(&out_xfer);
-
-    ESP_LOGI(TAG, "Bulk TX: %s (%zu bytes -> EP 0x%02x)",
-             ok ? "OK" : "FAIL", len, s_bulk_out_ep);
-    return ok ? (int)len : 0;
+    if (!data || len == 0 || !s_tx_stream) return 0;
+    // 推入队列, poll 任务会取出发送, 避免多任务并发调 TinyUSB
+    size_t n = xStreamBufferSend(s_tx_stream, data, len, pdMS_TO_TICKS(10));
+    if (n < len) ESP_LOGW(TAG, "TX 队列满, 丢 %zu 字节", len - n);
+    return (int)n;
 }
 
 bool usb_host_cdc_available(void) {
@@ -218,20 +233,35 @@ bool usb_host_cdc_available(void) {
 
 void usb_host_cdc_poll(void) {
     static uint32_t s_last_log = 0;
-    static bool s_test_sent = false;
-    static bool s_cdc_inited = false;
     uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
-    // tuh_task() 内部 UINT32_MAX 会永久阻塞, 改用 100ms 超时
-    // 足以完成设备枚举, 同时保证轮询任务不被卡死
     tuh_task_ext(100, false);
 
-    // 挂载后延迟初始化 (500ms 后执行 CDC ACM 配置)
-    if (s_cdc_mounted && !s_cdc_inited && now > 6500) {
-        s_cdc_inited = true;
-        uint8_t daddr = 1;  // 第一个 USB 设备
+    // Poll 任务内消费 TX 队列 (唯一调 tuh_edpt_xfer 的地方)
+    if (s_cdc_mounted && s_cdc_inited && s_bulk_out_ep && !s_bulk_out_busy) {
+        if (xStreamBufferBytesAvailable(s_tx_stream) > 0) {
+            size_t n = xStreamBufferReceive(s_tx_stream, s_usb_tx_buf, sizeof(s_usb_tx_buf), 0);
+            if (n > 0) {
+                s_bulk_out_busy = true;
+                tuh_xfer_t xfer = {
+                    .daddr = s_cdc_dev_addr,
+                    .ep_addr = s_bulk_out_ep,
+                    .buffer = s_usb_tx_buf,
+                    .buflen = (uint16_t)n,
+                    .complete_cb = usb_host_tx_cb,
+                };
+                if (!tuh_edpt_xfer(&xfer)) s_bulk_out_busy = false;
+                ESP_LOGI(TAG, "TX: %zu bytes -> EP 0x%02x", n, s_bulk_out_ep);
+            }
+        }
+    }
 
-        ESP_LOGI(TAG, "=== 延迟初始化 CDC ACM ===");
+    // 挂载后至少 500ms 才开始初始化
+    if (s_cdc_mounted && !s_cdc_inited && (now - s_mount_time > 500)) {
+        s_cdc_inited = true;
+        uint8_t daddr = s_cdc_dev_addr;
+
+        ESP_LOGI(TAG, "=== 延迟初始化 CDC ACM (daddr=%d)===", daddr);
 
         // SET_LINE_CODING (115200 8N1)
         cdc_line_coding_t line_coding = {
@@ -274,7 +304,7 @@ void usb_host_cdc_poll(void) {
         s_bulk_out_ep = ep_out_addr;
         s_bulk_in_ep = ep_in_addr;
 
-        // 首次扣动 IN 轮询扳机 — 没有这个接收链路永远不会启动
+        // 首次扣动 IN 轮询扳机
         if (in_opened) {
             tuh_xfer_t in_xfer = {
                 .daddr = daddr,
@@ -283,8 +313,25 @@ void usb_host_cdc_poll(void) {
                 .buflen = sizeof(s_async_rx_buf),
                 .complete_cb = usb_host_rx_cb,
             };
+            s_bulk_in_inflight = tuh_edpt_xfer(&in_xfer);
             ESP_LOGI(TAG, "后台 Bulk IN 轮询启动: %s",
-                     tuh_edpt_xfer(&in_xfer) ? "OK" : "FAIL");
+                     s_bulk_in_inflight ? "OK" : "FAIL");
+        }
+    }
+
+    // RX 引擎看门狗: 链条断裂超过 200ms 时重启
+    if (s_cdc_mounted && s_cdc_inited && s_bulk_in_ep) {
+        static uint32_t s_last_kick = 0;
+        if (!s_bulk_in_inflight && now - s_last_kick > 200) {
+            s_last_kick = now;
+            tuh_xfer_t in_xfer = {
+                .daddr = s_cdc_dev_addr,
+                .ep_addr = s_bulk_in_ep,
+                .buffer = s_async_rx_buf,
+                .buflen = sizeof(s_async_rx_buf),
+                .complete_cb = usb_host_rx_cb,
+            };
+            s_bulk_in_inflight = tuh_edpt_xfer(&in_xfer);
         }
     }
 
@@ -297,100 +344,4 @@ void usb_host_cdc_poll(void) {
         ESP_LOGI(TAG, "CDC ringbuf: %zu bytes", cdc_ringbuf_available());
     }
 
-    // ---- MSP 协议解析状态机 ----
-    // 持续从 ringbuf 读取字节并拼装完整的 MSP 帧
-    {
-        typedef enum {
-            MSP_IDLE, MSP_HEADER_M, MSP_HEADER_ARROW,
-            MSP_SIZE, MSP_CMD, MSP_PAYLOAD, MSP_CHECKSUM
-        } msp_parse_state_t;
-        static msp_parse_state_t s_parse = MSP_IDLE;
-        static uint8_t s_parse_buf[256];
-        static uint8_t s_parse_len = 0, s_parse_idx = 0, s_parse_cmd = 0, s_parse_csum = 0;
-
-        uint8_t byte;
-        while (cdc_ringbuf_read(&byte, 1) > 0) {
-            switch (s_parse) {
-            case MSP_IDLE:
-                if (byte == '$') s_parse = MSP_HEADER_M;
-                break;
-            case MSP_HEADER_M:
-                if (byte == 'M') s_parse = MSP_HEADER_ARROW;
-                else s_parse = MSP_IDLE;
-                break;
-            case MSP_HEADER_ARROW:
-                if (byte == '>') s_parse = MSP_SIZE;
-                else s_parse = MSP_IDLE;
-                break;
-            case MSP_SIZE:
-                s_parse_len = byte;
-                s_parse_csum = byte;
-                s_parse_idx = 0;
-                s_parse = MSP_CMD;
-                break;
-            case MSP_CMD:
-                s_parse_cmd = byte;
-                s_parse_csum ^= byte;
-                s_parse = (s_parse_len > 0) ? MSP_PAYLOAD : MSP_CHECKSUM;
-                break;
-            case MSP_PAYLOAD:
-                s_parse_buf[s_parse_idx++] = byte;
-                s_parse_csum ^= byte;
-                if (s_parse_idx >= s_parse_len) s_parse = MSP_CHECKSUM;
-                break;
-            case MSP_CHECKSUM: {
-                bool ok = (s_parse_csum == byte);
-                // 组装完整帧 hex 用于对比
-                char hex[256] = {0};
-                int p = 0;
-                p += sprintf(hex + p, "%02x%02x%02x%02x%02x",
-                             0x24, 0x4D, 0x3E, s_parse_len, s_parse_cmd);
-                for (int i = 0; i < s_parse_len && p < (int)sizeof(hex)-6; i++)
-                    p += sprintf(hex + p, "%02x", s_parse_buf[i]);
-                sprintf(hex + p, "%02x", byte);
-                ESP_LOGI(TAG, "RX: %s (%d bytes) %s", hex,
-                         6 + s_parse_len, ok ? "✓" : "CRC_FAIL");
-                s_parse = MSP_IDLE;
-                break;
-            }
-            }
-        }
-    }
-
-    // 逐条发送 MSP 命令 (基于响应驱动的状态机)
-    typedef struct {
-        const char* name;
-        uint8_t data[6];
-    } msp_cmd_t;
-    static const msp_cmd_t s_cmds[] = {
-        {"API_VERSION", {0x24,0x4D,0x3C,0x00,0x01,0x01}},
-        {"FC_VARIANT",  {0x24,0x4D,0x3C,0x00,0x02,0x02}},
-        {"FC_VERSION",  {0x24,0x4D,0x3C,0x00,0x03,0x03}},
-        {"BOARD_INFO",  {0x24,0x4D,0x3C,0x00,0x04,0x04}},
-        {"BUILD_INFO",  {0x24,0x4D,0x3C,0x00,0x05,0x05}},
-        {"NAME",        {0x24,0x4D,0x3C,0x00,0x0A,0x0A}},
-    };
-    static int s_cmd_idx = 0;
-    static bool s_sent = false;
-
-    if (s_cdc_inited && !s_test_sent && s_cmd_idx < 6) {
-        if (!s_sent) {
-            ESP_LOGI(TAG, "========== [%d/6] %s ==========",
-                     s_cmd_idx + 1, s_cmds[s_cmd_idx].name);
-            ESP_LOGI(TAG, "TX: 244d3c%02x%02x%02x",
-                     s_cmds[s_cmd_idx].data[3],
-                     s_cmds[s_cmd_idx].data[4],
-                     s_cmds[s_cmd_idx].data[5]);
-            usb_host_cdc_write(s_cmds[s_cmd_idx].data, 6);
-            s_sent = true;
-        } else if (cdc_ringbuf_available() > 0 || now > 10000 + s_cmd_idx * 2000) {
-            // ringbuf 有数据 或 超时 → 发下一条
-            s_cmd_idx++;
-            s_sent = false;
-        }
-        if (s_cmd_idx >= 6) {
-            s_test_sent = true;
-            ESP_LOGI(TAG, "========== MSP 测试完毕 ==========");
-        }
-    }
 }
