@@ -10,6 +10,7 @@
 #include "tusb.h"
 #include "host/usbh.h"
 #include "host/hcd.h"
+#include "class/cdc/cdc.h"      // cdc_line_coding_t, CDC_REQUEST_*
 #include "esp_private/usb_phy.h"
 #include "dwc2_forward.h"
 #include "freertos/stream_buffer.h"
@@ -46,6 +47,7 @@ static StreamBufferHandle_t s_tx_stream = NULL;
 static uint32_t s_last_rx_cb_time   = 0;   // 最近一次 IN 回调触发 (任意结果)
 static uint32_t s_last_rx_data_time = 0;   // 最近一次实际收到飞控数据
 static uint32_t s_last_tx_time      = 0;   // 最近一次提交 TX 传输
+static uint32_t s_last_tx_done_time = 0;   // 最近一次 Bulk OUT 完成 (节流用)
 
 // ========== 同步控制传输信号量 ==========
 static SemaphoreHandle_t s_ctrl_sem = NULL;
@@ -148,6 +150,7 @@ static bool cdc_ctrl_xfer_sync(uint8_t daddr, uint8_t bmRequestType,
 // ---------- Bulk TX 完成 ----------
 static void usb_host_tx_cb(tuh_xfer_t *xfer) {
     s_bulk_out_busy = false;
+    s_last_tx_done_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
     if (xfer->result != XFER_RESULT_SUCCESS) {
         ESP_LOGD(TAG, "Bulk TX result=%d", xfer->result);
     }
@@ -301,14 +304,17 @@ bool usb_host_cdc_available(void) {
 
 void usb_host_cdc_poll(void) {
     static uint32_t s_last_log = 0;
-    uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
     tuh_task_ext(100, false);
+
+    // 在 tuh_task 之后采样 now, 避免回调中更新的时间戳比 now 新导致下溢
+    uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
     // ================================================================
     // TX: 消费流缓冲 → Bulk OUT
     // ================================================================
-    if (s_cdc_mounted && s_cdc_inited && s_bulk_out_ep && !s_bulk_out_busy) {
+    if (s_cdc_mounted && s_cdc_inited && s_bulk_out_ep && !s_bulk_out_busy
+        && (now - s_last_tx_done_time >= 3)) {        // 3ms 节流: 给飞控 FIFO 喘息时间
         if (xStreamBufferBytesAvailable(s_tx_stream) > 0) {
             size_t n = xStreamBufferReceive(s_tx_stream, s_usb_tx_buf,
                                             sizeof(s_usb_tx_buf), 0);
