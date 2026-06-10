@@ -802,7 +802,10 @@ static void handle_rxflvl_irq(uint8_t rhport) {
       hcd_endpoint_t* edpt = &_hcd_data.edpt[xfer->ep_id];
 
       if (byte_count) {
-        dfifo_read_packet(dwc2, edpt->buffer + xfer->xferred_bytes, byte_count);
+        // 设备断开时 buffer 可能已被 HCD 清空，跳过读取 (残留 FIFO 数据已无效)
+        if (edpt->buffer) {
+          dfifo_read_packet(dwc2, edpt->buffer + xfer->xferred_bytes, byte_count);
+        }
         xfer->xferred_bytes += byte_count;
         xfer->fifo_bytes = byte_count;
       }
@@ -852,6 +855,9 @@ static bool handle_txfifo_empty(dwc2_regs_t* dwc2, bool is_periodic) {
         if ((xact_bytes > (txsts.fifo_available << 2)) || (txsts.req_queue_available == 0)) {
           return true;
         }
+
+        // skip if buffer is NULL (e.g. during disconnect cleanup)
+        if (edpt->buffer == NULL) continue;
 
         dfifo_write_packet(dwc2, ch_id, edpt->buffer + xfer->fifo_bytes, xact_bytes);
         xfer->fifo_bytes += xact_bytes;

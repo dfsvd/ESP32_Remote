@@ -187,10 +187,32 @@ static void usb_host_rx_cb(tuh_xfer_t *xfer) {
 // 任意 USB 设备枚举完成
 void tuh_mount_cb(uint8_t daddr) {
     ESP_LOGI(TAG, "USB 设备挂载 daddr=%d", daddr);
-    s_cdc_dev_addr = daddr;
-    s_cdc_mounted  = true;
-    s_cdc_inited   = false;
-    s_mount_time   = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    s_cdc_dev_addr      = daddr;
+    s_cdc_mounted       = true;
+    s_cdc_inited        = false;
+    s_bulk_out_busy     = false;   // 清洗卸载残留忙碌锁
+    s_bulk_in_inflight  = false;   // 重连后从干净状态重新启动 IN 轮询
+    s_mount_time        = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    cdc_ringbuf_reset();
+}
+
+// 焦土式重置所有 USB 设备状态 (断开、异常恢复统一入口)
+static void usb_host_cdc_reset(void) {
+    s_cdc_mounted       = false;
+    s_cdc_inited        = false;
+    s_bulk_out_busy     = false;
+    s_bulk_in_inflight  = false;
+    s_bulk_out_ep       = 0;
+    s_bulk_in_ep        = 0;
+    s_cdc_dev_addr      = 0;
+    s_mount_time        = 0;
+    s_last_tx_time      = 0;
+    s_last_tx_done_time = 0;
+    s_last_rx_cb_time   = 0;
+    s_last_rx_data_time = 0;
+
+    // 排空收发缓冲, 防止重连后发出残留数据
+    if (s_tx_stream) xStreamBufferReset(s_tx_stream);
     cdc_ringbuf_reset();
 }
 
@@ -198,13 +220,7 @@ void tuh_mount_cb(uint8_t daddr) {
 void tuh_umount_cb(uint8_t daddr) {
     ESP_LOGW(TAG, "USB 设备卸载 daddr=%d", daddr);
     (void)daddr;
-    // 焦土式重置所有状态
-    s_cdc_mounted    = false;
-    s_cdc_inited     = false;
-    s_bulk_out_busy  = false;
-    s_bulk_in_inflight = false;
-    s_bulk_out_ep    = 0;
-    s_bulk_in_ep     = 0;
+    usb_host_cdc_reset();
 }
 
 // =================================================================
@@ -243,6 +259,11 @@ void usb_host_cdc_init(void) {
     gpio_set_level(20, 0);
     vTaskDelay(pdMS_TO_TICKS(20));
 
+    // 释放 GPIO 控制权 → 高阻输入，让 USB PHY 接管 D+/D- (否则拔插无法检测)
+    gpio_set_direction(19, GPIO_MODE_INPUT);
+    gpio_set_direction(20, GPIO_MODE_INPUT);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
     // ---- 2. USB PHY → Host 模式 ----
     usb_phy_handle_t phy_handle = NULL;
     const usb_phy_config_t phy_config = {
@@ -277,8 +298,7 @@ void usb_host_cdc_init(void) {
 }
 
 void usb_host_cdc_deinit(void) {
-    s_cdc_mounted = false;
-    cdc_ringbuf_reset();
+    usb_host_cdc_reset();
     ESP_LOGI(TAG, "USB Host 已反初始化");
 }
 
@@ -412,42 +432,6 @@ void usb_host_cdc_poll(void) {
             s_last_rx_data_time = now;
             ESP_LOGI(TAG, "Bulk IN 轮询启动: %s",
                      s_bulk_in_inflight ? "OK" : "FAIL");
-        }
-    }
-
-    // ================================================================
-    // 【双轨看门狗】RX 引擎守护
-    // ================================================================
-    if (s_cdc_mounted && s_cdc_inited && s_bulk_in_ep) {
-
-        // ---- 轨 1: 传输链断裂重连 ----
-        // s_bulk_in_inflight=false 意味着回调中重提交失败或被外部重置
-        if (!s_bulk_in_inflight) {
-            tuh_xfer_t in_xfer = {
-                .daddr       = s_cdc_dev_addr,
-                .ep_addr     = s_bulk_in_ep,
-                .buffer      = s_async_rx_buf,
-                .buflen      = sizeof(s_async_rx_buf),
-                .complete_cb = usb_host_rx_cb,
-                .user_data   = 0,
-            };
-            s_bulk_in_inflight = tuh_edpt_xfer(&in_xfer);
-            if (s_bulk_in_inflight) {
-                s_last_rx_cb_time = now;
-            }
-        }
-        // ---- 轨 2: 通道挂死检测 ----
-        // s_bulk_in_inflight=true 但回调超过 1.5s 未触发 => DWC2 通道卡死
-        else if ((now - s_last_rx_cb_time) > 1500) {
-            // 仅在最近 3s 内发过指令时才触发 (静默时不误判)
-            if ((now - s_last_tx_time) < 3000) {
-                ESP_LOGW(TAG, "⚠️ RX 通道疑似挂死 (CB 静默 %lu ms), 重设中...",
-                         (unsigned long)(now - s_last_rx_cb_time));
-
-                // 强行重置 in_flight, 下次 poll 会走轨 1 重提
-                s_bulk_in_inflight = false;
-                s_last_rx_cb_time  = now;  // 防止连续高频触发
-            }
         }
     }
 
