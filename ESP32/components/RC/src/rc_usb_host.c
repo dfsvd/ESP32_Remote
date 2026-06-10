@@ -196,7 +196,23 @@ void tuh_mount_cb(uint8_t daddr) {
     cdc_ringbuf_reset();
 }
 
-// 焦土式重置所有 USB 设备状态 (断开、异常恢复统一入口)
+// 总线弹跳: 强制 D+/D- 拉低再释放, 触发 PHY 重新检测设备
+void usb_host_cdc_bus_bounce(void) {
+    ESP_LOGW(TAG, "USB 总线弹跳 — 拉低 D+/D- 触发 PHY 重检");
+    gpio_reset_pin(19);
+    gpio_reset_pin(20);
+    gpio_set_direction(19, GPIO_MODE_OUTPUT);
+    gpio_set_direction(20, GPIO_MODE_OUTPUT);
+    gpio_set_level(19, 0);
+    gpio_set_level(20, 0);
+    vTaskDelay(pdMS_TO_TICKS(30));
+    gpio_set_direction(19, GPIO_MODE_INPUT);
+    gpio_set_direction(20, GPIO_MODE_INPUT);
+    gpio_reset_pin(19);
+    gpio_reset_pin(20);
+}
+
+// 焦土式重置所有 USB 设备状态 + 总线弹跳 (断开、异常恢复统一入口)
 void usb_host_cdc_reset(void) {
     ESP_LOGW(TAG, "USB 设备状态重置 — 清空锁/缓冲/时间戳");
     s_cdc_mounted       = false;
@@ -215,6 +231,9 @@ void usb_host_cdc_reset(void) {
     // 排空收发缓冲, 防止重连后发出残留数据
     if (s_tx_stream) xStreamBufferReset(s_tx_stream);
     cdc_ringbuf_reset();
+
+    // 总线弹跳: 解决 port_connected=0 时 PHY 卡死无法检测插入
+    usb_host_cdc_bus_bounce();
 }
 
 // 任意 USB 设备拔出

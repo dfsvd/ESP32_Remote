@@ -53,9 +53,15 @@ void usb_host_cdc_poll(void);
 
 /**
  * @brief 重置 USB CDC 状态 (断开、异常恢复统一入口)
- * @note  清空所有锁、缓冲、时间戳，安全退出备用状态
+ * @note  清空所有锁、缓冲、时间戳 + 总线弹跳触发 PHY 重检
  */
 void usb_host_cdc_reset(void);
+
+/**
+ * @brief USB 总线弹跳: 拉低 D+/D- 再释放, 触发 PHY 重新检测设备
+ * @note  当 port_connected=0 时调用, 约 30ms 阻塞
+ */
+void usb_host_cdc_bus_bounce(void);
 
 #ifdef __cplusplus
 }
