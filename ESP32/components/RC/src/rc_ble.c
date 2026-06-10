@@ -92,6 +92,9 @@ static StreamBufferHandle_t s_nus_rx_stream = NULL;
 static uint16_t s_nus_tx_val_handle = 0;
 static ble_mode_t s_ble_mode = BLE_MODE_HID;
 
+// 链路健康追踪
+static int s_last_disconnect_reason = 0;
+
 static const uint8_t s_report_map[] = {
     0x05,
     0x01, // Usage Page (Generic Desktop)
@@ -574,6 +577,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         s_conn_handle = event->connect.conn_handle;
         s_connected = true;
         s_subscribed = false;
+        s_last_disconnect_reason = 0;  // 新连接清除上次断开原因
         ble_update_ready_state();
         ESP_LOGI(TAG, "BLE connected");
         audio_play(SOUND_BTCON);
@@ -591,7 +595,8 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
         s_ready_to_send = false;
         s_paired = false;
         s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
-        ESP_LOGI(TAG, "BLE disconnected: %d", event->disconnect.reason);
+        s_last_disconnect_reason = event->disconnect.reason;
+        ESP_LOGI(TAG, "BLE disconnected: reason=%d", event->disconnect.reason);
         audio_play(SOUND_BTDCN);
         ble_start_advertising();
         return 0;
@@ -856,4 +861,18 @@ void ble_uart_send(const uint8_t *data, size_t len) {
         rc != BLE_HS_EBUSY) {
         ESP_LOGW(TAG, "NUS TX notify failed: %d", rc);
     }
+}
+
+// ============= 链路健康 API =============
+
+int ble_get_last_disconnect_reason(void) {
+    return s_last_disconnect_reason;
+}
+
+void ble_reset_nus_stream(void) {
+    if (s_nus_rx_stream) {
+        xStreamBufferReset(s_nus_rx_stream);
+        ESP_LOGI(TAG, "NUS 接收流缓冲已清空 (链路恢复)");
+    }
+    s_nus_subscribed = false;
 }

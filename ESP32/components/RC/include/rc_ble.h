@@ -29,6 +29,10 @@ bool ble_uart_is_subscribed(void);
 int  ble_uart_read(uint8_t *buf, size_t max_len);
 void ble_uart_send(const uint8_t *data, size_t len);
 
+// ---- 链路健康 ----
+int  ble_get_last_disconnect_reason(void);  // 上次 BLE 断开原因 (0=未断开)
+void ble_reset_nus_stream(void);            // 清空 NUS 接收流缓冲
+
 #ifdef __cplusplus
 }
 #endif

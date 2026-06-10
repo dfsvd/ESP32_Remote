@@ -51,6 +51,12 @@ bool usb_host_cdc_available(void);
  */
 void usb_host_cdc_poll(void);
 
+/**
+ * @brief 重置 USB CDC 状态 (断开、异常恢复统一入口)
+ * @note  清空所有锁、缓冲、时间戳，安全退出备用状态
+ */
+void usb_host_cdc_reset(void);
+
 #ifdef __cplusplus
 }
 #endif

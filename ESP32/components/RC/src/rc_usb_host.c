@@ -197,7 +197,8 @@ void tuh_mount_cb(uint8_t daddr) {
 }
 
 // 焦土式重置所有 USB 设备状态 (断开、异常恢复统一入口)
-static void usb_host_cdc_reset(void) {
+void usb_host_cdc_reset(void) {
+    ESP_LOGW(TAG, "USB 设备状态重置 — 清空锁/缓冲/时间戳");
     s_cdc_mounted       = false;
     s_cdc_inited        = false;
     s_bulk_out_busy     = false;
