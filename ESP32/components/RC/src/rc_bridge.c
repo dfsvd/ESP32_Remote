@@ -2,6 +2,8 @@
 #include "rc_ble.h"
 #include "rc_crsf.h"
 #include "rc_usb_host.h"
+#include "driver/uart.h"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -122,6 +124,43 @@ static bool msp_parse_byte(msp_parser_t *ctx, uint8_t byte) {
     }
 }
 
+// ========== UART 桥接 ==========
+
+static bool uart_bridge_init(void) {
+    const uart_config_t cfg = {
+        .baud_rate = BRIDGE_UART_BAUD,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+    };
+    esp_err_t err = uart_param_config(BRIDGE_UART_PORT, &cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "UART param config fail: %s", esp_err_to_name(err));
+        return false;
+    }
+    err = uart_set_pin(BRIDGE_UART_PORT, BRIDGE_UART_TX_PIN,
+                       BRIDGE_UART_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "UART set pin fail: %s", esp_err_to_name(err));
+        return false;
+    }
+    err = uart_driver_install(BRIDGE_UART_PORT, BRIDGE_UART_BUF_SIZE,
+                              0, 0, NULL, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "UART driver install fail: %s", esp_err_to_name(err));
+        return false;
+    }
+    ESP_LOGI(TAG, "UART init: port=%d TX=%d RX=%d baud=%u buf=%u",
+             BRIDGE_UART_PORT, BRIDGE_UART_TX_PIN, BRIDGE_UART_RX_PIN,
+             BRIDGE_UART_BAUD, BRIDGE_UART_BUF_SIZE);
+    return true;
+}
+
+static void uart_bridge_deinit(void) {
+    uart_driver_delete(BRIDGE_UART_PORT);
+}
+
 // ========== 桥接任务 ==========
 
 static TaskHandle_t s_bridge_task = NULL;
@@ -211,6 +250,32 @@ static void bridge_task(void *arg) {
                 }
             }
 
+        } else if (path == BRIDGE_PATH_UART) {
+            // ====== 路径: 纯串口 (原始字节转发) ======
+
+            // 方向 A: BLE (手机) -> UART (飞控)
+            int n = ble_uart_read(buf, sizeof(buf));
+            if (n > 0) {
+                uart_write_bytes(BRIDGE_UART_PORT, buf, n);
+                s_last_pending_req = now;
+                ESP_LOGI(TAG, "-> UART: %d bytes", n);
+            }
+
+            // 方向 B: UART (飞控) -> BLE (手机): MTU 分片 + 拥塞控制 (同 USB CDC)
+            n = uart_read_bytes(BRIDGE_UART_PORT, buf, sizeof(buf), 0);
+            if (n > 0) {
+                s_last_pending_req = 0;
+                int sent = 0;
+                while (sent < n) {
+                    int chunk = (n - sent > BLE_SAFE_PAYLOAD) ? BLE_SAFE_PAYLOAD : (n - sent);
+                    ble_uart_send(buf + sent, chunk);
+                    sent += chunk;
+                    vTaskDelay(pdMS_TO_TICKS(1));
+                }
+                ESP_LOGI(TAG, "-> BLE: %d bytes (%d pkt)", n,
+                         (n + BLE_SAFE_PAYLOAD - 1) / BLE_SAFE_PAYLOAD);
+            }
+
         } else {
             // ====== 路径: CRSF MSP ======
 
@@ -242,11 +307,23 @@ void bridge_start(bridge_path_t path) {
         ESP_LOGW(TAG, "桥接任务已在运行");
         return;
     }
+
+    if (path == BRIDGE_PATH_UART) {
+        if (!uart_bridge_init()) {
+            ESP_LOGE(TAG, "UART 桥接初始化失败, 放弃启动任务");
+            return;
+        }
+    } else if (path == BRIDGE_PATH_CRSF_MSP) {
+        // CRSF 由调用方在外部初始化
+    }
+    // BRIDGE_PATH_USB_CDC: USB Host 由调用方在外部初始化
+
     s_bridge_path = path;
     xTaskCreatePinnedToCore(bridge_task, "bridge", BRIDGE_TASK_STACK, NULL,
                             BRIDGE_TASK_PRIORITY, &s_bridge_task, 1);
     ESP_LOGI(TAG, "桥接任务已创建 (path=%s)",
-             path == BRIDGE_PATH_USB_CDC ? "USB_CDC" : "CRSF_MSP");
+             path == BRIDGE_PATH_USB_CDC ? "USB_CDC" :
+             path == BRIDGE_PATH_UART    ? "UART" : "CRSF_MSP");
 }
 
 void bridge_stop(void) {

@@ -5,15 +5,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Flash Commands
 
 ### ESP32 Firmware (ESP-IDF, target: esp32s3)
-```bash
-# From the ESP32/ directory
-# Configure (cmake init)
-D:\Program\Development\Espressif\tools\cmake\3.30.2\bin\cmake.exe -G Ninja -DPYTHON_DEPS_CHECKED=1 -DESP_PLATFORM=1 -B build -S .
 
-# Build
-cmake --build build -- -j$(nproc)
+**Environment setup (required once per shell):**
+```powershell
+$env:IDF_PATH = "D:\Program\Development\Espressif\frameworks\esp-idf-v5.5.2"
+$env:PYTHON   = "D:\Program\Development\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe"
+```
 
-# Full flash + monitor (replace COM_PORT)
+**Configure (cmake init, from ESP32/ directory):**
+```powershell
+cmake -G Ninja -DPYTHON_DEPS_CHECKED=1 -DESP_PLATFORM=1 -B build -S .
+```
+
+**Build:**
+```powershell
+cmake --build build -- -j8
+```
+
+**Full flash + monitor (replace COM_PORT, env must be set):**
+```powershell
 idf.py -p COM_PORT flash monitor
 ```
 
