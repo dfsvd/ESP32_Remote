@@ -16,6 +16,114 @@ static const char *TAG = "BRIDGE";
 #define FC_TIMEOUT_CONN_MIN_MS  3000
 #define FC_TIMEOUT_CONN_MAX_MS  25000
 
+// ========== MSP 帧装配器 (BLE -> USB 方向) ==========
+#define MSP_FRAME_MAX    264  // 6(头部) + 255(payload) + 余量
+#define MSP_HEADER_LEN    6   // $ M < len cmd [payload] cksum 的最小固定部分
+#define MSP_ID_SYMBOL     0x24  // '$'
+#define MSP_ID_M          0x4D  // 'M'
+#define MSP_DIR_REQ       0x3C  // '<' BLE->FC 请求
+#define MSP_DIR_RSP       0x3E  // '>' FC->BLE 响应
+
+typedef enum {
+    MSP_STATE_IDLE = 0,
+    MSP_STATE_GOT_DOLLAR,
+    MSP_STATE_GOT_M,
+    MSP_STATE_HAVE_DIR,
+    MSP_STATE_COLLECTING,
+} msp_state_t;
+
+typedef struct {
+    uint8_t  buf[MSP_FRAME_MAX];
+    uint16_t pos;
+    uint8_t  expected_len;   // payload 长度 (0-255)
+    uint16_t frame_len;      // 完整帧总长度 (设置后为 6 + expected_len)
+    msp_state_t state;
+} msp_parser_t;
+
+// 重置解析器
+static void msp_parser_reset(msp_parser_t *ctx) {
+    ctx->pos = 0;
+    ctx->expected_len = 0;
+    ctx->frame_len = 0;
+    ctx->state = MSP_STATE_IDLE;
+}
+
+// 逐字节喂入, 返回 true 表示拼出一条整帧 (在 ctx->buf[0..frame_len-1])
+// false = 还在收或帧错误已丢弃
+static bool msp_parse_byte(msp_parser_t *ctx, uint8_t byte) {
+    switch (ctx->state) {
+
+    case MSP_STATE_IDLE:
+        if (byte == MSP_ID_SYMBOL) {
+            ctx->buf[0] = byte;
+            ctx->pos = 1;
+            ctx->state = MSP_STATE_GOT_DOLLAR;
+        }
+        return false;
+
+    case MSP_STATE_GOT_DOLLAR:
+        if (byte == MSP_ID_M) {
+            ctx->buf[1] = byte;
+            ctx->pos = 2;
+            ctx->state = MSP_STATE_GOT_M;
+        } else {
+            ctx->state = MSP_STATE_IDLE;  // 头错, 丢弃
+        }
+        return false;
+
+    case MSP_STATE_GOT_M:
+        if (byte == MSP_DIR_REQ || byte == MSP_DIR_RSP) {
+            ctx->buf[2] = byte;
+            ctx->pos = 3;
+            ctx->state = MSP_STATE_HAVE_DIR;
+        } else {
+            ctx->state = MSP_STATE_IDLE;
+        }
+        return false;
+
+    case MSP_STATE_HAVE_DIR:
+        // 这里收到的是 len 字节
+        ctx->buf[3] = byte;
+        ctx->expected_len = byte;
+        ctx->frame_len = MSP_HEADER_LEN + byte;  // 6 + payload
+        if (ctx->frame_len > MSP_FRAME_MAX) {
+            ESP_LOGW(TAG, "MSP frame too long: %u > %d", ctx->frame_len, MSP_FRAME_MAX);
+            msp_parser_reset(ctx);
+            return false;
+        }
+        ctx->pos = 4;
+        ctx->state = MSP_STATE_COLLECTING;
+        return false;
+
+    case MSP_STATE_COLLECTING:
+        ctx->buf[ctx->pos++] = byte;
+        if (ctx->pos >= ctx->frame_len) {
+            // 收齐整帧, 校验 checksum
+            uint8_t cksum = 0;
+            for (uint16_t i = 3; i < ctx->frame_len - 1; i++) {
+                cksum ^= ctx->buf[i];  // XOR(len, cmd, payload...)
+            }
+            if (cksum == ctx->buf[ctx->frame_len - 1]) {
+                // 校验通过, 状态回 IDLE, 数据保留给调用方读取
+                ctx->state = MSP_STATE_IDLE;
+                ctx->pos = 0;
+                return true;
+            }
+            ESP_LOGW(TAG, "MSP cksum fail: calc=0x%02x got=0x%02x", cksum,
+                     ctx->buf[ctx->frame_len - 1]);
+            msp_parser_reset(ctx);
+            return false;
+        }
+        return false;
+
+    default:
+        msp_parser_reset(ctx);
+        return false;
+    }
+}
+
+// ========== 桥接任务 ==========
+
 static TaskHandle_t s_bridge_task = NULL;
 static bridge_path_t s_bridge_path = BRIDGE_PATH_CRSF_MSP;
 
@@ -23,12 +131,13 @@ static void bridge_task(void *arg) {
     uint8_t buf[1024];
     bridge_path_t path = s_bridge_path;
     static bool     s_prev_ble_connected   = false;
-    static uint32_t s_ble_connect_time     = 0;  // BLE 连接建立时刻
-    static uint32_t s_last_pending_req     = 0;  // BLE->USB 转发后尚未收到飞控回复
+    static uint32_t s_ble_connect_time     = 0;
+    static uint32_t s_last_pending_req     = 0;
     static int      s_last_handled_reason  = 0;
+    static msp_parser_t s_msp_parser;       // MSP 帧解析器
 
     if (path == BRIDGE_PATH_USB_CDC) {
-        ESP_LOGI(TAG, "桥接任务已启动 (BLE NUS <-> USB CDC ACM)");
+        ESP_LOGI(TAG, "桥接任务已启动 (BLE NUS <-> USB CDC ACM) [MSP 帧装配]");
     } else {
         ESP_LOGI(TAG, "桥接任务已启动 (BLE NUS <-> CRSF MSP)");
     }
@@ -42,16 +151,13 @@ static void bridge_task(void *arg) {
             s_ble_connect_time = now;
             s_last_pending_req = 0;
             s_last_handled_reason = 0;
+            msp_parser_reset(&s_msp_parser);
         }
         s_prev_ble_connected = ble_conn;
 
         if (path == BRIDGE_PATH_USB_CDC) {
 
             // ====== 链路健康监控 ======
-            // FC 超时模式:
-            //   1. BLE->USB 发了请求 (s_last_pending_req != 0)
-            //   2. 飞控没回复 (标记未清除)
-            //   3. BLE 连接持续 ~10s 后断开
             if (!ble_conn && s_last_pending_req != 0) {
                 int reason = ble_get_last_disconnect_reason();
                 if (reason != s_last_handled_reason) {
@@ -72,12 +178,19 @@ static void bridge_task(void *arg) {
 
             // ====== 路径: USB CDC ACM ======
 
-            // 方向 A: BLE (手机) -> USB (飞控)
+            // 方向 A: BLE (手机) -> MSP 帧装配 -> USB (飞控)
             int n = ble_uart_read(buf, sizeof(buf));
             if (n > 0) {
-                s_last_pending_req = now;  // 标记: 等待飞控回复
-                ESP_LOGI(TAG, "-> USB: %d bytes (pending)", n);
-                usb_host_cdc_write(buf, (size_t)n);
+                for (int i = 0; i < n; i++) {
+                    if (msp_parse_byte(&s_msp_parser, buf[i])) {
+                        // 凑齐一条完整 MSP 帧, 一次性写入 USB
+                        usb_host_cdc_write(s_msp_parser.buf, s_msp_parser.frame_len);
+                        s_last_pending_req = now;
+                        uint8_t cmd = s_msp_parser.buf[4];
+                        uint8_t len = s_msp_parser.buf[3];
+                        ESP_LOGI(TAG, "-> USB: MSP cmd=%d len=%d", cmd, len);
+                    }
+                }
             }
 
             // 方向 B: USB (飞控) -> BLE (手机): MTU 分片 + 拥塞控制
