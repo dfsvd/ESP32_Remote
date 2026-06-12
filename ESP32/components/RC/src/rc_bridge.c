@@ -257,7 +257,7 @@ static void bridge_task(void *arg) {
                         uint8_t len = s_msp_parser.buf[3];
                         s_pending_cmd = cmd;
                         s_pending_start_ms = now;
-                        ESP_LOGI(TAG, "[USB] BLE->FC: cmd=%d len=%d", cmd, len);
+                        ESP_LOGD(TAG, "[USB] BLE->FC: cmd=%d len=%d", cmd, len);
                     }
                 }
             }
@@ -280,7 +280,7 @@ static void bridge_task(void *arg) {
                         for (int di = 0; di < dl; di++)
                             sprintf(hx + di * 3, "%02x ", usb_buf[di]);
                         hx[dl * 3 - 1] = '\0';
-                        ESP_LOGI(TAG, "[USB] FC->BLE: cmd=%d len=%d RTT=%ums [%s]",
+                        ESP_LOGD(TAG, "[USB] FC->BLE: cmd=%d len=%d RTT=%ums [%s]",
                                  cmd, n, rtt, hx);
                         if (s_pending_cmd == cmd)
                             s_pending_cmd = 0xFF;
@@ -306,13 +306,15 @@ static void bridge_task(void *arg) {
                 s_pending_cmd = 0xFF;
             }
 
-            // 周期报告 (3s) — 始终打印, 零流量也打印以识别空窗
+            // 周期报告 (3s) — 有流量才打印
             if (now - s_last_report_ms >= 3000) {
-                ESP_LOGI(TAG, "[USB] ↑%uB(%upkt) ↓%uB(%upkt) | RTT=%ums | BLE:%us | ERR:%u",
-                         s_tx_bytes, s_tx_pkts, s_rx_bytes, s_rx_pkts,
-                         s_last_rtt,
-                         (now - s_ble_connect_time) / 1000,
-                         s_error_count);
+                if (s_tx_pkts > 0 || s_rx_pkts > 0) {
+                    ESP_LOGI(TAG, "[USB] ↑%uB(%upkt) ↓%uB(%upkt) | RTT=%ums | BLE:%us | ERR:%u",
+                             s_tx_bytes, s_tx_pkts, s_rx_bytes, s_rx_pkts,
+                             s_last_rtt,
+                             (now - s_ble_connect_time) / 1000,
+                             s_error_count);
+                }
                 s_tx_pkts = s_tx_bytes = 0;
                 s_rx_pkts = s_rx_bytes = 0;
                 s_last_report_ms = now;
@@ -340,7 +342,7 @@ static void bridge_task(void *arg) {
                 if (cmd != 0xFF) {
                     s_pending_cmd = cmd;
                     s_pending_start_ms = now;
-                    ESP_LOGI(TAG, "[UART] BLE->FC: cmd=%d len=%d", cmd, n);
+                    ESP_LOGD(TAG, "[UART] BLE->FC: cmd=%d len=%d", cmd, n);
                 } else {
                     ESP_LOGD(TAG, "[UART] BLE->FC: %d bytes (non-MSP)", n);
                 }
@@ -362,7 +364,7 @@ static void bridge_task(void *arg) {
                     for (int di = 0; di < dl; di++)
                         sprintf(hx + di * 3, "%02x ", buf[di]);
                     hx[dl * 3 - 1] = '\0';
-                    ESP_LOGI(TAG, "[UART] FC->BLE: cmd=%d len=%d RTT=%ums [%s]",
+                    ESP_LOGD(TAG, "[UART] FC->BLE: cmd=%d len=%d RTT=%ums [%s]",
                              cmd, n, rtt, hx);
                     if (s_pending_cmd == cmd)
                         s_pending_cmd = 0xFF;

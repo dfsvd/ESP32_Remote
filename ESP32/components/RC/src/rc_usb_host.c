@@ -177,7 +177,7 @@ static void usb_host_rx_cb(tuh_xfer_t *xfer) {
     if (xfer->result == XFER_RESULT_SUCCESS && xfer->actual_len > 0) {
         s_last_rx_data_time = s_last_rx_cb_time;
         cdc_ringbuf_write(s_async_rx_buf, xfer->actual_len);
-        ESP_LOGI(TAG, "IN cb #%lu: result=%d len=%u ring_avail=%zu/%d",
+        ESP_LOGD(TAG, "IN cb #%lu: result=%d len=%u ring_avail=%zu/%d",
                  s_in_cb_count, xfer->result, xfer->actual_len,
                  cdc_ringbuf_available(), CDC_RINGBUF_SIZE);
     } else if (xfer->result != XFER_RESULT_SUCCESS) {
