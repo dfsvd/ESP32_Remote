@@ -262,7 +262,7 @@ void usb_host_cdc_reset(void) {
     cdc_ringbuf_reset();
 
     // 总线弹跳: 解决 port_connected=0 时 PHY 卡死无法检测插入
-    usb_host_cdc_bus_bounce();
+    // 注意: 不做 GPIO 总线弹跳, 避免破坏 PHY 拔插检测能力
 }
 
 // 任意 USB 设备拔出
