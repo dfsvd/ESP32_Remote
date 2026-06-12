@@ -9,15 +9,14 @@ CompileFlags:
     -fno-builtin-memset,
     -fno-builtin-bzero,
   ]
-  Add:
-    [
-      --target=xtensa-esp32s3-elf,
-      -resource-dir=/home/xinian/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/14.2.0,
-      -isystem,
-      /home/xinian/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/xtensa-esp-elf/sys-include,
-      -isystem,
-      /home/xinian/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/xtensa-esp-elf/include,
-    ]
+  Add: [
+    --target=xtensa-esp32s3-elf,
+    -resource-dir=D:/Program/Espressif/tools/esp-clang/esp-19.1.2_20250312/esp-clang/lib/clang/19,
+    -isystem,
+    D:/Program/Espressif/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/xtensa-esp-elf/sys-include,
+    -isystem,
+    D:/Program/Espressif/tools/xtensa-esp-elf/esp-14.2.0_20260121/xtensa-esp-elf/xtensa-esp-elf/include,
+  ]
 
 Diagnostics:
   Suppress: [

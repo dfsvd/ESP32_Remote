@@ -8,8 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Environment setup (required once per shell):**
 ```powershell
-$env:IDF_PATH = "D:\Program\Development\Espressif\frameworks\esp-idf-v5.5.2"
-$env:PYTHON   = "D:\Program\Development\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe"
+$env:IDF_PATH = "D:\Program\Espressif\frameworks\esp-idf-v5.5.4"
+$env:PYTHON   = "D:\Program\Espressif\python_env\idf5.5_py3.11_env\Scripts\python.exe"
 ```
 
 **Configure (cmake init, from ESP32/ directory):**
