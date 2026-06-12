@@ -161,6 +161,21 @@ static void uart_bridge_deinit(void) {
     uart_driver_delete(BRIDGE_UART_PORT);
 }
 
+/**
+ * @brief 快速解析 MSP 帧头部提取 Command ID
+ * @note  流式探针: 仅读前 5 字节，不做校验/状态机。
+ *        若物理层分片导致帧头截断则返回 0xFF — 诊断级别可接受。
+ * @param data  字节流
+ * @param len   长度
+ * @return cmd ID, 非 MSP 帧返回 0xFF
+ */
+static uint8_t msp_parse_cmd_id(const uint8_t *data, int len) {
+    if (len >= 5 && data[0] == '$' && data[1] == 'M' &&
+        (data[2] == '<' || data[2] == '>'))
+        return data[4];
+    return 0xFF;
+}
+
 // ========== 桥接任务 ==========
 
 static TaskHandle_t s_bridge_task = NULL;
@@ -177,6 +192,8 @@ static void bridge_task(void *arg) {
 
     if (path == BRIDGE_PATH_USB_CDC) {
         ESP_LOGI(TAG, "桥接任务已启动 (BLE NUS <-> USB CDC ACM) [MSP 帧装配]");
+    } else if (path == BRIDGE_PATH_UART) {
+        ESP_LOGI(TAG, "桥接任务已启动 (BLE NUS <-> UART) [诊断探针]");
     } else {
         ESP_LOGI(TAG, "桥接任务已启动 (BLE NUS <-> CRSF MSP)");
     }
@@ -251,20 +268,51 @@ static void bridge_task(void *arg) {
             }
 
         } else if (path == BRIDGE_PATH_UART) {
-            // ====== 路径: 纯串口 (原始字节转发) ======
+            // ====== 路径: 纯串口 (诊断探针) ======
+            static uint32_t s_tx_pkts = 0, s_tx_bytes = 0;
+            static uint32_t s_rx_pkts = 0, s_rx_bytes = 0;
+            static uint32_t s_last_report_ms = 0;
+            static uint32_t s_error_count = 0;
+            static uint8_t  s_pending_cmd = 0xFF;
+            static uint32_t s_pending_start_ms = 0;
+            static uint32_t s_last_rtt = 0;
 
             // 方向 A: BLE (手机) -> UART (飞控)
             int n = ble_uart_read(buf, sizeof(buf));
             if (n > 0) {
                 uart_write_bytes(BRIDGE_UART_PORT, buf, n);
+                s_tx_pkts++;
+                s_tx_bytes += n;
                 s_last_pending_req = now;
-                ESP_LOGI(TAG, "-> UART: %d bytes", n);
+
+                uint8_t cmd = msp_parse_cmd_id(buf, n);
+                if (cmd != 0xFF) {
+                    s_pending_cmd = cmd;
+                    s_pending_start_ms = now;
+                    ESP_LOGD(TAG, "[UART] BLE->FC: cmd=%d len=%d", cmd, n);
+                } else {
+                    ESP_LOGD(TAG, "[UART] BLE->FC: %d bytes (non-MSP)", n);
+                }
             }
 
-            // 方向 B: UART (飞控) -> BLE (手机): MTU 分片 + 拥塞控制 (同 USB CDC)
+            // 方向 B: UART (飞控) -> BLE (手机): MTU 分片 + 拥塞控制
             n = uart_read_bytes(BRIDGE_UART_PORT, buf, sizeof(buf), 0);
             if (n > 0) {
+                s_rx_pkts++;
+                s_rx_bytes += n;
                 s_last_pending_req = 0;
+
+                uint8_t cmd = msp_parse_cmd_id(buf, n);
+                if (cmd != 0xFF) {
+                    uint32_t rtt = now - s_pending_start_ms;
+                    s_last_rtt = rtt;
+                    ESP_LOGD(TAG, "[UART] FC->BLE: cmd=%d len=%d RTT=%ums", cmd, n, rtt);
+                    if (s_pending_cmd == cmd)
+                        s_pending_cmd = 0xFF;
+                } else {
+                    ESP_LOGD(TAG, "[UART] FC->BLE: %d bytes (stream)", n);
+                }
+
                 int sent = 0;
                 while (sent < n) {
                     int chunk = (n - sent > BLE_SAFE_PAYLOAD) ? BLE_SAFE_PAYLOAD : (n - sent);
@@ -272,8 +320,46 @@ static void bridge_task(void *arg) {
                     sent += chunk;
                     vTaskDelay(pdMS_TO_TICKS(1));
                 }
-                ESP_LOGI(TAG, "-> BLE: %d bytes (%d pkt)", n,
-                         (n + BLE_SAFE_PAYLOAD - 1) / BLE_SAFE_PAYLOAD);
+            }
+
+            // 无应答检测
+            if (s_pending_cmd != 0xFF && now - s_pending_start_ms > 500) {
+                ESP_LOGW(TAG, "[UART] MSP 请求无应答: cmd=%d 等待 %ums",
+                         s_pending_cmd, now - s_pending_start_ms);
+                s_error_count++;
+                s_pending_cmd = 0xFF;
+            }
+
+            // BLE 断开跟踪
+            if (!ble_conn && s_last_pending_req != 0) {
+                int reason = ble_get_last_disconnect_reason();
+                if (reason != s_last_handled_reason) {
+                    s_last_handled_reason = reason;
+                    uint32_t conn_ms = now - s_ble_connect_time;
+                    ESP_LOGW(TAG, "[UART] BLE 断开: reason=%d conn=%ums %s",
+                             reason, conn_ms,
+                             s_pending_cmd != 0xFF ? "(请求未回复)" : "");
+                    ble_reset_nus_stream();
+                    s_last_pending_req = 0;
+                    s_pending_cmd = 0xFF;
+                    s_error_count++;
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                    continue;
+                }
+            }
+
+            // 周期报告 (3s)
+            if (now - s_last_report_ms >= 3000) {
+                if (s_tx_pkts > 0 || s_rx_pkts > 0) {
+                    ESP_LOGI(TAG, "[UART] \xE2\x86\x91%uB(%upkt) \xE2\x86\x93%uB(%upkt) | RTT=%ums | BLE:%us | ERR:%u",
+                             s_tx_bytes, s_tx_pkts, s_rx_bytes, s_rx_pkts,
+                             s_last_rtt,
+                             (now - s_ble_connect_time) / 1000,
+                             s_error_count);
+                }
+                s_tx_pkts = s_tx_bytes = 0;
+                s_rx_pkts = s_rx_bytes = 0;
+                s_last_report_ms = now;
             }
 
         } else {

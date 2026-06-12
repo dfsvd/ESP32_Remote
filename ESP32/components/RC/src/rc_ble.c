@@ -399,7 +399,7 @@ static int ble_nus_rx_access(uint16_t conn_handle, uint16_t attr_handle,
             uint16_t copy_len = len < sizeof(buf) ? len : sizeof(buf);
             if (os_mbuf_copydata(ctxt->om, 0, copy_len, buf) == 0) {
                 size_t written = xStreamBufferSend(s_nus_rx_stream, buf, copy_len, 0);
-                ESP_LOGI(TAG, "NUS RX: %u/%u bytes -> stream buf", written, copy_len);
+                ESP_LOGD(TAG, "NUS RX: %u/%u bytes -> stream buf", written, copy_len);
             }
         }
         return 0;
