@@ -640,7 +640,9 @@ void app_main(void) {
 
     if (use_ble_nus) {
         ble_init(&joy, BLE_MODE_NUS);
-        usb_host_cdc_init();
+        if (use_usb_host) {
+            usb_host_cdc_init();
+        }
         bridge_start(BRIDGE_PATH_USB_CDC);
     } else if (use_ble) {
         // BLE HID 初始化

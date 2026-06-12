@@ -43,6 +43,12 @@ static volatile bool s_bulk_in_inflight = false;
 
 static StreamBufferHandle_t s_tx_stream = NULL;
 
+// ========== 诊断计数器 ==========
+static uint32_t s_in_cb_count        = 0;   // Bulk IN 回调触发总数
+static uint32_t s_in_rearm_fail_count = 0;  // IN re-arm 失败次数
+static uint32_t s_ringbuf_overflow_count = 0; // 环形缓冲溢出次数
+static uint32_t s_recovery_count     = 0;   // 恢复路径触发次数
+
 // ========== 看门狗时间戳 (绝对毫秒) ==========
 static uint32_t s_last_rx_cb_time   = 0;   // 最近一次 IN 回调触发 (任意结果)
 static uint32_t s_last_rx_data_time = 0;   // 最近一次实际收到飞控数据
@@ -59,7 +65,13 @@ static void cdc_ringbuf_write(const uint8_t *data, size_t len) {
     for (size_t i = 0; i < len; ++i) {
         size_t next = (s_cdc_rx_head + 1) % CDC_RINGBUF_SIZE;
         if (next == s_cdc_rx_tail) {
-            ESP_LOGW(TAG, "CDC RX 环形缓冲溢出！丢 %zu 字节", len - i);
+            s_ringbuf_overflow_count++;
+            /* inline: fill = (head - tail) % size */
+            size_t fill = (s_cdc_rx_head >= s_cdc_rx_tail)
+                          ? (s_cdc_rx_head - s_cdc_rx_tail)
+                          : (CDC_RINGBUF_SIZE - (s_cdc_rx_tail - s_cdc_rx_head));
+            ESP_LOGW(TAG, "CDC RX 环形缓冲溢出! 丢 %zu 字节 (overflow#%lu, fill=%zu)",
+                     len - i, s_ringbuf_overflow_count, fill);
             return;
         }
         s_cdc_rx_buf[s_cdc_rx_head] = data[i];
@@ -160,12 +172,16 @@ static void usb_host_tx_cb(tuh_xfer_t *xfer) {
 static void usb_host_rx_cb(tuh_xfer_t *xfer) {
     s_bulk_in_inflight = false;
     s_last_rx_cb_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    s_in_cb_count++;
 
     if (xfer->result == XFER_RESULT_SUCCESS && xfer->actual_len > 0) {
         s_last_rx_data_time = s_last_rx_cb_time;
         cdc_ringbuf_write(s_async_rx_buf, xfer->actual_len);
+        ESP_LOGI(TAG, "IN cb #%lu: result=%d len=%u ring_avail=%zu/%d",
+                 s_in_cb_count, xfer->result, xfer->actual_len,
+                 cdc_ringbuf_available(), CDC_RINGBUF_SIZE);
     } else if (xfer->result != XFER_RESULT_SUCCESS) {
-        ESP_LOGD(TAG, "Bulk RX result=%d", xfer->result);
+        ESP_LOGW(TAG, "IN cb #%lu: result=%d (非成功)", s_in_cb_count, xfer->result);
     }
 
     // 连续轮询: 立即重新提交 IN 传输
@@ -178,7 +194,13 @@ static void usb_host_rx_cb(tuh_xfer_t *xfer) {
             .complete_cb = usb_host_rx_cb,
             .user_data   = 0,
         };
-        s_bulk_in_inflight = tuh_edpt_xfer(&in_xfer);
+        bool rearm_ok = tuh_edpt_xfer(&in_xfer);
+        s_bulk_in_inflight = rearm_ok;
+        if (!rearm_ok) {
+            s_in_rearm_fail_count++;
+            ESP_LOGW(TAG, "IN cb #%lu: re-arm 失败 (fail#%lu)",
+                     s_in_cb_count, s_in_rearm_fail_count);
+        }
     }
 }
 
@@ -384,11 +406,27 @@ void usb_host_cdc_poll(void) {
     }
 
     // ================================================================
-    // Bulk IN 恢复: 若 IN 轮询意外停止 (tuh_edpt_xfer 失败), 重新拉起
+    // Bulk IN 恢复: 若 IN 轮询意外停止 (s_bulk_in_inflight 因错误变 false)
+    // 正常情况: 回调触发 → 重新提交 → s_bulk_in_inflight = true
+    // 恢复条件: s_bulk_in_inflight=false 且不是首次启动
+    // 注意: 不设超时静默检测 — Bulk IN pending 等待数据是正常行为
     // ================================================================
-    if (s_cdc_mounted && s_cdc_inited && s_bulk_in_ep && !s_bulk_in_inflight) {
-        // 清除可能的端点 stall, 否则 tuh_edpt_xfer 会继续失败
-        hcd_edpt_clear_stall(0, s_cdc_dev_addr, s_bulk_in_ep);
+    if (s_cdc_mounted && s_cdc_inited && s_bulk_in_ep && !s_bulk_in_inflight
+        && s_last_rx_cb_time > 0) {
+        s_recovery_count++;
+        uint32_t since_cb = s_last_rx_cb_time ? (now - s_last_rx_cb_time) : 0;
+        uint32_t since_data = s_last_rx_data_time ? (now - s_last_rx_data_time) : 0;
+        ESP_LOGD(TAG, "Bulk IN 恢复 #%lu: 距上次cb=%ums 距上次数据=%ums",
+                 s_recovery_count, since_cb, since_data);
+
+        // 尝试清除 stall, 只有真实 stall 才打 WARN
+        esp_err_t stall_rc = hcd_edpt_clear_stall(0, s_cdc_dev_addr, s_bulk_in_ep);
+        if (stall_rc == ESP_ERR_INVALID_ARG) {
+            // ESP_ERR_INVALID_ARG (1) = 端点不在 stall 状态, 正常, 直接跳过
+        } else if (stall_rc != ESP_OK) {
+            ESP_LOGW(TAG, "hcd_edpt_clear_stall 返回 %d", stall_rc);
+        }
+
         tuh_xfer_t in_xfer = {
             .daddr       = s_cdc_dev_addr,
             .ep_addr     = s_bulk_in_ep,
@@ -399,9 +437,12 @@ void usb_host_cdc_poll(void) {
         };
         s_bulk_in_inflight = tuh_edpt_xfer(&in_xfer);
         if (s_bulk_in_inflight) {
-            ESP_LOGI(TAG, "Bulk IN 已恢复: ep=0x%02x", s_bulk_in_ep);
+            ESP_LOGD(TAG, "Bulk IN 已恢复: ep=0x%02x", s_bulk_in_ep);
             s_last_rx_cb_time = now;
             s_last_rx_data_time = now;
+        } else {
+            ESP_LOGW(TAG, "Bulk IN 恢复失败: tuh_edpt_xfer 返回 false (尝试#%lu)",
+                     s_recovery_count);
         }
     }
 
@@ -491,6 +532,9 @@ void usb_host_cdc_poll(void) {
         bool port_connected = hcd_port_connect_status(0);
         ESP_LOGD(TAG, "USB 状态: inited=%d mounted=%d port_connected=%d",
                  tuh_inited(), s_cdc_mounted, port_connected);
-        ESP_LOGD(TAG, "CDC ringbuf: %zu bytes", cdc_ringbuf_available());
+        ESP_LOGD(TAG, "CDC ringbuf: %zu bytes overflow=%lu",
+                 cdc_ringbuf_available(), s_ringbuf_overflow_count);
+        ESP_LOGD(TAG, "IN cb#%lu rearm_fail#%lu recovery#%lu",
+                 s_in_cb_count, s_in_rearm_fail_count, s_recovery_count);
     }
 }
