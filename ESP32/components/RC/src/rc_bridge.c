@@ -183,6 +183,7 @@ static bridge_path_t s_bridge_path = BRIDGE_PATH_CRSF_MSP;
 
 static void bridge_task(void *arg) {
     uint8_t buf[1024];
+    int n;
     bridge_path_t path = s_bridge_path;
     static bool     s_prev_ble_connected   = false;
     static uint32_t s_ble_connect_time     = 0;
@@ -237,27 +238,31 @@ static void bridge_task(void *arg) {
             static uint32_t s_rx_pkts = 0, s_rx_bytes = 0;
             static uint32_t s_last_report_ms = 0;
             static uint32_t s_error_count = 0;
+            static uint32_t s_consecutive_timeouts = 0;
             static uint8_t  s_pending_cmd = 0xFF;
             static uint32_t s_pending_start_ms = 0;
             static uint32_t s_last_rtt = 0;
 
-            // 方向 A: BLE (手机) -> USB (飞控) - 原始字节全部转发, 不经过 MSP 帧装配
-            int n = ble_uart_read(buf, sizeof(buf));
-            if (n > 0) {
-                // 转发所有字节, 支持 MSPv1 () 和 MSPv2 ()
-                usb_host_cdc_write(buf, n);
-                s_tx_pkts++;
-                s_tx_bytes += n;
-                s_last_pending_req = now;
+            // ====== USB 方向: BLE <-> USB CDC ======
 
-                // MSP 解析仅用于 cmd 跟踪 (不影响数据转发)
-                for (int i = 0; i < n; i++) {
-                    if (msp_parse_byte(&s_msp_parser, buf[i])) {
-                        uint8_t cmd = s_msp_parser.buf[4];
-                        uint8_t len = s_msp_parser.buf[3];
-                        s_pending_cmd = cmd;
-                        s_pending_start_ms = now;
-                        ESP_LOGD(TAG, "[USB] BLE->FC: cmd=%d len=%d", cmd, len);
+            // 方向 A: BLE (手机) -> USB (飞控)
+            // 流控: 有未回复的命令时暂停转发, 等飞控回复后再继续
+            if (s_pending_cmd == 0xFF || now - s_pending_start_ms > 500) {
+                n = ble_uart_read(buf, sizeof(buf));
+                if (n > 0) {
+                    usb_host_cdc_write(buf, n);
+                    s_tx_pkts++;
+                    s_tx_bytes += n;
+                    s_last_pending_req = now;
+
+                    for (int i = 0; i < n; i++) {
+                        if (msp_parse_byte(&s_msp_parser, buf[i])) {
+                            uint8_t cmd = s_msp_parser.buf[4];
+                            uint8_t len = s_msp_parser.buf[3];
+                            s_pending_cmd = cmd;
+                            s_pending_start_ms = now;
+                            ESP_LOGD(TAG, "[USB] BLE->FC: cmd=%d len=%d", cmd, len);
+                        }
                     }
                 }
             }
@@ -282,8 +287,10 @@ static void bridge_task(void *arg) {
                         hx[dl * 3 - 1] = '\0';
                         ESP_LOGD(TAG, "[USB] FC->BLE: cmd=%d len=%d RTT=%ums [%s]",
                                  cmd, n, rtt, hx);
-                        if (s_pending_cmd == cmd)
+                        if (s_pending_cmd == cmd) {
                             s_pending_cmd = 0xFF;
+                            s_consecutive_timeouts = 0;  // 收到回复, 连续超时计数清零
+                        }
                     } else {
                         ESP_LOGD(TAG, "[USB] FC->BLE: %d bytes (stream)", n);
                     }
@@ -298,12 +305,23 @@ static void bridge_task(void *arg) {
                 }
             }
 
-            // 无应答检测
+            // 无应答检测 + 连续超时自动恢复
             if (s_pending_cmd != 0xFF && now - s_pending_start_ms > 500) {
                 ESP_LOGW(TAG, "[USB] MSP 请求无应答: cmd=%d 等待 %ums",
                          s_pending_cmd, now - s_pending_start_ms);
                 s_error_count++;
+                s_consecutive_timeouts++;
                 s_pending_cmd = 0xFF;
+
+                // 连续 3 次超时 → 主动复位 USB, 不等 BLE 断开
+                if (s_consecutive_timeouts >= 3) {
+                    ESP_LOGW(TAG, "连续 %lu 次 MSP 超时 — 重置 USB 连接",
+                             s_consecutive_timeouts);
+                    s_consecutive_timeouts = 0;
+                    usb_host_cdc_reset();
+                    ble_reset_nus_stream();
+                    msp_parser_reset(&s_msp_parser);
+                }
             }
 
             // 周期报告 (3s) — 有流量才打印
@@ -331,7 +349,7 @@ static void bridge_task(void *arg) {
             static uint32_t s_last_rtt = 0;
 
             // 方向 A: BLE (手机) -> UART (飞控)
-            int n = ble_uart_read(buf, sizeof(buf));
+            n = ble_uart_read(buf, sizeof(buf));
             if (n > 0) {
                 uart_write_bytes(BRIDGE_UART_PORT, buf, n);
                 s_tx_pkts++;
@@ -425,7 +443,7 @@ static void bridge_task(void *arg) {
             // ====== 路径: CRSF MSP ======
 
             // 方向 A: BLE (手机) -> CRSF (飞控)
-            int n = ble_uart_read(buf, sizeof(buf));
+            n = ble_uart_read(buf, sizeof(buf));
             if (n > 0) {
                 ESP_LOGI(TAG, "-> CRSF: %d bytes [%02x %02x %02x ...]", n,
                          n >= 1 ? buf[0] : 0, n >= 2 ? buf[1] : 0, n >= 3 ? buf[2] : 0);

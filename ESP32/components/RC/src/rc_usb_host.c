@@ -230,8 +230,10 @@ void usb_host_cdc_bus_bounce(void) {
     vTaskDelay(pdMS_TO_TICKS(30));
     gpio_set_direction(19, GPIO_MODE_INPUT);
     gpio_set_direction(20, GPIO_MODE_INPUT);
-    gpio_reset_pin(19);
-    gpio_reset_pin(20);
+    // 恢复 USB PHY IOMUX 功能 (gpio_reset_pin 断开了 PHY 与引脚的连接)
+    // ESP32-S3: GPIO19=DM(D-), GPIO20=DP(D+), IOMUX func=1 = USB_OTG
+    gpio_iomux_in(19, 1);   gpio_iomux_out(19, 1, false);
+    gpio_iomux_in(20, 1);   gpio_iomux_out(20, 1, false);
 }
 
 // 焦土式重置所有 USB 设备状态 + 总线弹跳 (断开、异常恢复统一入口)
