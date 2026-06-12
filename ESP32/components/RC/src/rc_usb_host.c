@@ -45,6 +45,7 @@ static StreamBufferHandle_t s_tx_stream = NULL;
 
 // ========== 诊断计数器 ==========
 static uint32_t s_in_cb_count        = 0;   // Bulk IN 回调触发总数
+static uint32_t s_in_err_count       = 0;   // 连续 IN 错误次数 (成功时清零)
 static uint32_t s_in_rearm_fail_count = 0;  // IN re-arm 失败次数
 static uint32_t s_ringbuf_overflow_count = 0; // 环形缓冲溢出次数
 static uint32_t s_recovery_count     = 0;   // 恢复路径触发次数
@@ -177,15 +178,21 @@ static void usb_host_rx_cb(tuh_xfer_t *xfer) {
     if (xfer->result == XFER_RESULT_SUCCESS && xfer->actual_len > 0) {
         s_last_rx_data_time = s_last_rx_cb_time;
         cdc_ringbuf_write(s_async_rx_buf, xfer->actual_len);
+        s_in_err_count = 0;  // 收到数据, 重置错误计数
         ESP_LOGD(TAG, "IN cb #%lu: result=%d len=%u ring_avail=%zu/%d",
                  s_in_cb_count, xfer->result, xfer->actual_len,
                  cdc_ringbuf_available(), CDC_RINGBUF_SIZE);
     } else if (xfer->result != XFER_RESULT_SUCCESS) {
-        ESP_LOGW(TAG, "IN cb #%lu: result=%d (非成功)", s_in_cb_count, xfer->result);
+        s_in_err_count++;
+        if (s_in_err_count <= 3) {
+            ESP_LOGD(TAG, "IN cb #%lu: result=%d (连续%d次错误)",
+                     s_in_cb_count, xfer->result, s_in_err_count);
+        }
     }
 
     // 连续轮询: 立即重新提交 IN 传输
-    if (s_cdc_mounted && s_bulk_in_ep) {
+    // 连续错误超过 10 次时暂停续约 (等待设备重连)
+    if (s_cdc_mounted && s_bulk_in_ep && s_in_err_count < 10) {
         tuh_xfer_t in_xfer = {
             .daddr       = xfer->daddr,
             .ep_addr     = s_bulk_in_ep,
@@ -198,8 +205,6 @@ static void usb_host_rx_cb(tuh_xfer_t *xfer) {
         s_bulk_in_inflight = rearm_ok;
         if (!rearm_ok) {
             s_in_rearm_fail_count++;
-            ESP_LOGW(TAG, "IN cb #%lu: re-arm 失败 (fail#%lu)",
-                     s_in_cb_count, s_in_rearm_fail_count);
         }
     }
 }
@@ -536,7 +541,7 @@ void usb_host_cdc_poll(void) {
                  tuh_inited(), s_cdc_mounted, port_connected);
         ESP_LOGD(TAG, "CDC ringbuf: %zu bytes overflow=%lu",
                  cdc_ringbuf_available(), s_ringbuf_overflow_count);
-        ESP_LOGD(TAG, "IN cb#%lu rearm_fail#%lu recovery#%lu",
-                 s_in_cb_count, s_in_rearm_fail_count, s_recovery_count);
+        ESP_LOGD(TAG, "IN cb#%lu err#%lu rearm_fail#%lu recovery#%lu",
+                 s_in_cb_count, s_in_err_count, s_in_rearm_fail_count, s_recovery_count);
     }
 }
