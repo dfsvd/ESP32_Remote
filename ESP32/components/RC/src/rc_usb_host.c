@@ -353,6 +353,12 @@ void usb_host_cdc_poll(void) {
     // ================================================================
     // TX: 消费流缓冲 → Bulk OUT
     // ================================================================
+    // TX 看门狗: 若 Bulk OUT 卡死超过 500ms 强制释放
+    if (s_bulk_out_busy && s_bulk_out_ep && (now - s_last_tx_time > 500)) {
+        ESP_LOGW(TAG, "Bulk OUT 可能卡死, 强制释放 (last_tx=%ums)", now - s_last_tx_time);
+        s_bulk_out_busy = false;
+    }
+
     if (s_cdc_mounted && s_cdc_inited && s_bulk_out_ep && !s_bulk_out_busy
         && (now - s_last_tx_done_time >= 3)) {        // 3ms 节流: 给飞控 FIFO 喘息时间
         if (xStreamBufferBytesAvailable(s_tx_stream) > 0) {
@@ -372,8 +378,30 @@ void usb_host_cdc_poll(void) {
                 } else {
                     s_bulk_out_busy = false;
                 }
-                ESP_LOGI(TAG, "TX: %zu bytes -> EP 0x%02x", n, s_bulk_out_ep);
+                ESP_LOGD(TAG, "TX: %zu bytes -> EP 0x%02x", n, s_bulk_out_ep);
             }
+        }
+    }
+
+    // ================================================================
+    // Bulk IN 恢复: 若 IN 轮询意外停止 (tuh_edpt_xfer 失败), 重新拉起
+    // ================================================================
+    if (s_cdc_mounted && s_cdc_inited && s_bulk_in_ep && !s_bulk_in_inflight) {
+        // 清除可能的端点 stall, 否则 tuh_edpt_xfer 会继续失败
+        hcd_edpt_clear_stall(0, s_cdc_dev_addr, s_bulk_in_ep);
+        tuh_xfer_t in_xfer = {
+            .daddr       = s_cdc_dev_addr,
+            .ep_addr     = s_bulk_in_ep,
+            .buffer      = s_async_rx_buf,
+            .buflen      = sizeof(s_async_rx_buf),
+            .complete_cb = usb_host_rx_cb,
+            .user_data   = 0,
+        };
+        s_bulk_in_inflight = tuh_edpt_xfer(&in_xfer);
+        if (s_bulk_in_inflight) {
+            ESP_LOGI(TAG, "Bulk IN 已恢复: ep=0x%02x", s_bulk_in_ep);
+            s_last_rx_cb_time = now;
+            s_last_rx_data_time = now;
         }
     }
 
@@ -456,13 +484,13 @@ void usb_host_cdc_poll(void) {
     }
 
     // ================================================================
-    // 状态日志 (每 5s)
+    // 状态日志 (每 5s, 仅 DEBUG)
     // ================================================================
     if (now - s_last_log > 5000) {
         s_last_log = now;
         bool port_connected = hcd_port_connect_status(0);
-        ESP_LOGI(TAG, "USB 状态: inited=%d mounted=%d port_connected=%d",
+        ESP_LOGD(TAG, "USB 状态: inited=%d mounted=%d port_connected=%d",
                  tuh_inited(), s_cdc_mounted, port_connected);
-        ESP_LOGI(TAG, "CDC ringbuf: %zu bytes", cdc_ringbuf_available());
+        ESP_LOGD(TAG, "CDC ringbuf: %zu bytes", cdc_ringbuf_available());
     }
 }

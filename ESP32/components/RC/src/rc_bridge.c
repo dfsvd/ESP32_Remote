@@ -232,19 +232,29 @@ static void bridge_task(void *arg) {
                 }
             }
 
-            // ====== 路径: USB CDC ACM ======
+            // ====== 路径: USB CDC ACM (诊断探针) ======
+            static uint32_t s_tx_pkts = 0, s_tx_bytes = 0;
+            static uint32_t s_rx_pkts = 0, s_rx_bytes = 0;
+            static uint32_t s_last_report_ms = 0;
+            static uint32_t s_error_count = 0;
+            static uint8_t  s_pending_cmd = 0xFF;
+            static uint32_t s_pending_start_ms = 0;
+            static uint32_t s_last_rtt = 0;
 
             // 方向 A: BLE (手机) -> MSP 帧装配 -> USB (飞控)
             int n = ble_uart_read(buf, sizeof(buf));
             if (n > 0) {
                 for (int i = 0; i < n; i++) {
                     if (msp_parse_byte(&s_msp_parser, buf[i])) {
-                        // 凑齐一条完整 MSP 帧, 一次性写入 USB
                         usb_host_cdc_write(s_msp_parser.buf, s_msp_parser.frame_len);
+                        s_tx_pkts++;
+                        s_tx_bytes += s_msp_parser.frame_len;
                         s_last_pending_req = now;
                         uint8_t cmd = s_msp_parser.buf[4];
                         uint8_t len = s_msp_parser.buf[3];
-                        ESP_LOGI(TAG, "-> USB: MSP cmd=%d len=%d", cmd, len);
+                        s_pending_cmd = cmd;
+                        s_pending_start_ms = now;
+                        ESP_LOGD(TAG, "[USB] BLE->FC: cmd=%d len=%d", cmd, len);
                     }
                 }
             }
@@ -254,7 +264,21 @@ static void bridge_task(void *arg) {
                 uint8_t usb_buf[512];
                 n = usb_host_cdc_read(usb_buf, sizeof(usb_buf));
                 if (n > 0) {
-                    s_last_pending_req = 0;  // 飞控回复了, 清除等待
+                    s_rx_pkts++;
+                    s_rx_bytes += n;
+                    s_last_pending_req = 0;
+
+                    uint8_t cmd = msp_parse_cmd_id(usb_buf, n);
+                    if (cmd != 0xFF) {
+                        uint32_t rtt = now - s_pending_start_ms;
+                        s_last_rtt = rtt;
+                        ESP_LOGD(TAG, "[USB] FC->BLE: cmd=%d len=%d RTT=%ums", cmd, n, rtt);
+                        if (s_pending_cmd == cmd)
+                            s_pending_cmd = 0xFF;
+                    } else {
+                        ESP_LOGD(TAG, "[USB] FC->BLE: %d bytes (stream)", n);
+                    }
+
                     int sent = 0;
                     while (sent < n) {
                         int chunk = (n - sent > BLE_SAFE_PAYLOAD) ? BLE_SAFE_PAYLOAD : (n - sent);
@@ -262,9 +286,29 @@ static void bridge_task(void *arg) {
                         sent += chunk;
                         vTaskDelay(pdMS_TO_TICKS(1));
                     }
-                    ESP_LOGI(TAG, "-> BLE: %d bytes (%d pkt)", n,
-                             (n + BLE_SAFE_PAYLOAD - 1) / BLE_SAFE_PAYLOAD);
                 }
+            }
+
+            // 无应答检测
+            if (s_pending_cmd != 0xFF && now - s_pending_start_ms > 500) {
+                ESP_LOGW(TAG, "[USB] MSP 请求无应答: cmd=%d 等待 %ums",
+                         s_pending_cmd, now - s_pending_start_ms);
+                s_error_count++;
+                s_pending_cmd = 0xFF;
+            }
+
+            // 周期报告 (3s)
+            if (now - s_last_report_ms >= 3000) {
+                if (s_tx_pkts > 0 || s_rx_pkts > 0) {
+                    ESP_LOGI(TAG, "[USB] \xE2\x86\x91%uB(%upkt) \xE2\x86\x93%uB(%upkt) | RTT=%ums | BLE:%us | ERR:%u",
+                             s_tx_bytes, s_tx_pkts, s_rx_bytes, s_rx_pkts,
+                             s_last_rtt,
+                             (now - s_ble_connect_time) / 1000,
+                             s_error_count);
+                }
+                s_tx_pkts = s_tx_bytes = 0;
+                s_rx_pkts = s_rx_bytes = 0;
+                s_last_report_ms = now;
             }
 
         } else if (path == BRIDGE_PATH_UART) {
@@ -383,6 +427,9 @@ static void bridge_task(void *arg) {
                 }
             }
         }
+
+        // 定期尝试清空 BLE TX 待发送缓冲
+        ble_uart_flush();
 
         vTaskDelay(pdMS_TO_TICKS(BRIDGE_POLL_MS));
     }

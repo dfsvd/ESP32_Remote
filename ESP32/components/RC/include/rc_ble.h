@@ -28,6 +28,7 @@ bool ble_is_paired(void);
 bool ble_uart_is_subscribed(void);
 int  ble_uart_read(uint8_t *buf, size_t max_len);
 void ble_uart_send(const uint8_t *data, size_t len);
+bool ble_uart_flush(void);  // 清空 TX 待发送缓冲
 
 // ---- 链路健康 ----
 int  ble_get_last_disconnect_reason(void);  // 上次 BLE 断开原因 (0=未断开)

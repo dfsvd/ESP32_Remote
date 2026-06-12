@@ -850,16 +850,56 @@ int ble_uart_read(uint8_t *buf, size_t max_len) {
     return (int)xStreamBufferReceive(s_nus_rx_stream, buf, max_len, 0);
 }
 
+// NUS TX 待发送缓冲 — 当 NimBLE 忙或未订阅时暂存, 防静默丢包
+#define BLE_TX_PEND_MAX 512
+static uint8_t s_tx_pend_buf[BLE_TX_PEND_MAX];
+static size_t s_tx_pend_len = 0;
+
+bool ble_uart_flush(void) {
+    if (s_tx_pend_len == 0) return true;
+    if (!s_nus_subscribed || s_nus_tx_val_handle == 0) return false;
+
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(s_tx_pend_buf, s_tx_pend_len);
+    if (!om) return false;
+    int rc = ble_gatts_notify_custom(s_conn_handle, s_nus_tx_val_handle, om);
+    if (rc == 0 || rc == BLE_HS_EDONE) {
+        s_tx_pend_len = 0;
+        return true;
+    }
+    return false;
+}
+
+// 内部: 将数据追加到待发送缓冲
+static void ble_tx_pend(const uint8_t *data, size_t len) {
+    size_t free = sizeof(s_tx_pend_buf) - s_tx_pend_len;
+    size_t can_copy = len < free ? len : free;
+    memcpy(s_tx_pend_buf + s_tx_pend_len, data, can_copy);
+    s_tx_pend_len += can_copy;
+    if (can_copy < len)
+        ESP_LOGW(TAG, "NUS TX pend buf 满, 丢 %zu 字节", len - can_copy);
+}
+
 void ble_uart_send(const uint8_t *data, size_t len) {
-    if (!data || len == 0 || !s_nus_subscribed || s_nus_tx_val_handle == 0) {
+    if (!data || len == 0) return;
+
+    // 先尝试清空积压
+    if (s_tx_pend_len > 0)
+        ble_uart_flush();
+
+    // 如果还有积压或未订阅, 暂存
+    if (s_tx_pend_len > 0 || !s_nus_subscribed || s_nus_tx_val_handle == 0) {
+        ble_tx_pend(data, len);
         return;
     }
+
+    // 正常发送
     struct os_mbuf *om = ble_hs_mbuf_from_flat(data, len);
-    if (!om) return;
+    if (!om) { ble_tx_pend(data, len); return; }
     int rc = ble_gatts_notify_custom(s_conn_handle, s_nus_tx_val_handle, om);
-    if (rc != 0 && rc != BLE_HS_EDONE && rc != BLE_HS_ENOTCONN &&
-        rc != BLE_HS_EBUSY) {
-        ESP_LOGW(TAG, "NUS TX notify failed: %d", rc);
+    if (rc == 0 || rc == BLE_HS_EDONE) return;
+    if (rc == BLE_HS_EBUSY || rc != BLE_HS_ENOTCONN) {
+        // EBUSY → 暂存; 其他非致命错误也暂存
+        ble_tx_pend(data, len);
     }
 }
 
