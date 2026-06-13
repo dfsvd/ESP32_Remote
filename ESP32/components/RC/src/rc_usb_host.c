@@ -426,13 +426,8 @@ void usb_host_cdc_poll(void) {
         ESP_LOGD(TAG, "Bulk IN 恢复 #%lu: 距上次cb=%ums 距上次数据=%ums",
                  s_recovery_count, since_cb, since_data);
 
-        // 尝试清除 stall, 只有真实 stall 才打 WARN
-        esp_err_t stall_rc = hcd_edpt_clear_stall(0, s_cdc_dev_addr, s_bulk_in_ep);
-        if (stall_rc == ESP_ERR_INVALID_ARG) {
-            // ESP_ERR_INVALID_ARG (1) = 端点不在 stall 状态, 正常, 直接跳过
-        } else if (stall_rc != ESP_OK) {
-            ESP_LOGW(TAG, "hcd_edpt_clear_stall 返回 %d", stall_rc);
-        }
+        // 尝试清除 stall (非 stall 状态调用无害, 忽略返回值)
+        hcd_edpt_clear_stall(0, s_cdc_dev_addr, s_bulk_in_ep);
 
         tuh_xfer_t in_xfer = {
             .daddr       = s_cdc_dev_addr,
