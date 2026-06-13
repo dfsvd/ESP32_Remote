@@ -81,8 +81,8 @@ let _mockInterval = null
  * 生成模拟 GPS 数据, 在圆形路线上飞行
  */
 function startMockTelemetry() {
-  const CENTER_LAT = 22.5       // 深圳附近
-  const CENTER_LON = 114.0
+  const CENTER_LAT = 22.537
+  const CENTER_LON = 113.979
   const RADIUS_DEG = 0.002      // ~200m 半径
   const ALTITUDE_M = 120        // 飞行高度 120m
   const SPEED_MS = 12           // ~43km/h

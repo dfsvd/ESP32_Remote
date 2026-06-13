@@ -13,6 +13,7 @@
 #include "rc_led.h"
 #include "rc_usb.h"
 #include "rc_audio.h"
+#include "esp_netif.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -35,130 +36,6 @@ static uint32_t s_bind_start_ms = 0;
 #define MAX_PROFILES 8
 #define PROFILE_NAME_LEN 16
 
-// =================================================================================
-// 快速 DNS 响应 —
-// 连通性检测域名→ESP32(204通过)，其他域名→NXDOMAIN(防止请求淹没)
-// =================================================================================
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-
-#define DNS_PORT 53
-
-static void dns_server_task(void *pvParameters) {
-    struct sockaddr_in bind_addr = {
-        .sin_addr.s_addr = htonl(INADDR_ANY),
-        .sin_family = AF_INET,
-        .sin_port = htons(DNS_PORT),
-    };
-
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock < 0) {
-        vTaskDelete(NULL);
-        return;
-    }
-    if (bind(sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) != 0) {
-        close(sock);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    uint8_t buf[512];
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-
-    while (1) {
-        int len = recvfrom(sock, buf, sizeof(buf), 0,
-                           (struct sockaddr *)&client_addr, &client_len);
-        if (len < 12)
-            continue;
-
-        // 跳过问题名称 (不定长)，提取域名用于判断
-        int qname_len = 0;
-        while (len > 12 + qname_len && buf[12 + qname_len] != 0)
-            qname_len += buf[12 + qname_len] + 1;
-        qname_len++;
-        if (12 + qname_len + 4 > len)
-            continue;
-
-        // 只响应 A 记录查询
-        uint16_t qtype = (buf[12 + qname_len] << 8) | buf[12 + qname_len + 1];
-        uint16_t qclass =
-            (buf[12 + qname_len + 2] << 8) | buf[12 + qname_len + 3];
-        if (qtype != 1 || qclass != 1)
-            continue;
-
-        // 判断是否是连通性检测域名
-        bool is_connectivity_check = false;
-        int src = 12;
-        char domain_buf[128];
-        int di = 0;
-        while (src < 12 + qname_len - 1 && di < 120) {
-            uint8_t label_len = buf[src];
-            if (label_len == 0)
-                break;
-            for (uint8_t j = 0; j < label_len && di < 120; j++)
-                domain_buf[di++] = (char)tolower(buf[src + 1 + j]);
-            domain_buf[di++] = '.';
-            src += 1 + label_len;
-        }
-        if (di > 0)
-            domain_buf[di - 1] = '\0';
-        if (strstr(domain_buf, "connectivitycheck") ||
-            strstr(domain_buf, "gstatic") || strstr(domain_buf, "google") ||
-            strstr(domain_buf, "miui") || strstr(domain_buf, "mi.com"))
-            is_connectivity_check = true;
-
-        if (is_connectivity_check) {
-            // 连通性检测 → 指向 ESP32，配合 /generate_204 返回 204
-            buf[2] = 0x81;
-            buf[3] = 0x80;
-            buf[6] = 0;
-            buf[7] = 1;
-            buf[8] = 0;
-            buf[9] = 0;
-            buf[10] = 0;
-            buf[11] = 0;
-
-            int off = 12 + qname_len + 4;
-            buf[off] = 0xC0;
-            buf[off + 1] = 0x0C;
-            buf[off + 2] = 0x00;
-            buf[off + 3] = 0x01;
-            buf[off + 4] = 0x00;
-            buf[off + 5] = 0x01;
-            buf[off + 6] = 0x00;
-            buf[off + 7] = 0x00;
-            buf[off + 8] = 0x00;
-            buf[off + 9] = 0x3C;
-            buf[off + 10] = 0x00;
-            buf[off + 11] = 0x04;
-            buf[off + 12] = 192;
-            buf[off + 13] = 168;
-            buf[off + 14] = 4;
-            buf[off + 15] = 1;
-
-            sendto(sock, buf, off + 16, 0, (struct sockaddr *)&client_addr,
-                   client_len);
-        } else {
-            // 其他域名 → NXDOMAIN，App 不会连接
-            buf[2] = 0x83;
-            buf[3] = 0x83;
-            buf[6] = 0;
-            buf[7] = 0;
-            buf[8] = 0;
-            buf[9] = 0;
-            buf[10] = 0;
-            buf[11] = 0;
-
-            sendto(sock, buf, len, 0, (struct sockaddr *)&client_addr,
-                   client_len);
-        }
-    }
-
-    close(sock);
-    vTaskDelete(NULL);
-}
 
 // 1. 本地的 16 通道测试数组 (出厂默认值)
 extern channel_cal_t limit[16];
@@ -1733,8 +1610,29 @@ void rc_wifi_server_init(fpv_joystick_report_t *joy) {
 
     ESP_LOGI(TAG, "WiFi AP 启动完成. SSID:%s", wifi_config.ap.ssid);
 
-    xTaskCreatePinnedToCore(dns_server_task, "dns_captive", 3072, NULL, 3, NULL,
-                            0);
+    /* ---- DHCP 零网关配置: 手机 WiFi 只用于局域网, 蜂窝走外网 ---- */
+    esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    if (ap_netif) {
+        // 1. 停止 DHCP
+        ESP_ERROR_CHECK(esp_netif_dhcps_stop(ap_netif));
+
+        // 2. 清除 DHCP 网关标志 → 不发 option 3 (Router)
+        uint8_t opt_val = 0;
+        ESP_ERROR_CHECK(esp_netif_dhcps_option(
+            ap_netif, ESP_NETIF_OP_SET,
+            ESP_NETIF_ROUTER_SOLICITATION_ADDRESS,
+            &opt_val, sizeof(opt_val)));
+
+        // 3. 清除 DHCP DNS 标志 → 不发 option 6 (DNS Server)
+        ESP_ERROR_CHECK(esp_netif_dhcps_option(
+            ap_netif, ESP_NETIF_OP_SET,
+            ESP_NETIF_DOMAIN_NAME_SERVER,
+            &opt_val, sizeof(opt_val)));
+
+        // 4. 重启 DHCP
+        ESP_ERROR_CHECK(esp_netif_dhcps_start(ap_netif));
+        ESP_LOGI(TAG, "DHCP 零网关已配置: 手机 WiFi 仅局域网, 蜂窝走外网");
+    }
 
     start_webserver(joy);
 }

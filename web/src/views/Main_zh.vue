@@ -458,6 +458,7 @@ const telemetryT = {
 
 const mapT = {
   waitingGps: '等待 GPS 信号…',
+  demo: '模拟数据',
   follow: '跟随',
   following: '追踪中',
   center: '居中',

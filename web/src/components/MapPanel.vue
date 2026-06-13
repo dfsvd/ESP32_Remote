@@ -3,6 +3,29 @@
     <!-- 地图容器 -->
     <div ref="mapContainer" class="absolute inset-0 z-0"></div>
 
+    <!-- 顶部提示条: GPS 信号丢失 -->
+    <div
+      v-if="!hasGpsFix"
+      class="absolute top-3 left-3 z-[1000] flex items-center gap-3 px-3 py-2 rounded-lg bg-darwin-panel/90 backdrop-blur border border-[var(--theme-border)] shadow-lg"
+    >
+      <span class="text-darwin-muted text-xs">🛰 {{ t.waitingGps || '等待 GPS 信号…' }}</span>
+      <button
+        type="button"
+        @click="startDemoMode"
+        class="px-3 py-1 text-xs font-bold rounded-full bg-darwin-amber/20 text-darwin-amber border border-darwin-amber/30 hover:bg-darwin-amber/30 transition-all"
+      >
+        {{ t.demo || '模拟数据' }}
+      </button>
+    </div>
+
+    <!-- 网络提示: 瓦片加载失败 -->
+    <div
+      v-if="tileLoadFailed"
+      class="absolute top-16 left-3 z-[1000] flex items-center gap-2 px-3 py-2 rounded-lg bg-orange-500/20 backdrop-blur border border-orange-500/30 shadow-lg max-w-[calc(100%-6rem)]"
+    >
+      <span class="text-orange-300 text-[0.65rem] leading-tight">{{ t.networkHint || '无法加载地图瓦片，请开启手机“无线局域网助理”(iOS) 或“智能网络切换”(Android) 后重试' }}</span>
+    </div>
+
     <!-- 右上角控制栏 -->
     <div class="absolute top-3 right-3 z-[1000] flex flex-col gap-2">
       <!-- 地图源切换 -->
@@ -56,18 +79,6 @@
       >
         ✕ {{ t.clearTrail || '清除' }}
       </button>
-    </div>
-
-    <!-- GPS 丢失覆盖层 -->
-    <div
-      v-if="!hasGpsFix"
-      class="absolute inset-0 z-[500] flex items-center justify-center bg-darwin-panel/80 backdrop-blur-sm"
-    >
-      <div class="text-center px-6 py-8 rounded-2xl bg-darwin-panel/90 border border-[var(--theme-border)] shadow-2xl">
-        <div class="text-4xl mb-3">🛰</div>
-        <p class="text-darwin-muted text-sm font-bold">{{ t.waitingGps || '等待 GPS 信号…' }}</p>
-        <p class="text-darwin-muted/60 text-xs mt-1">{{ gpsInfo }}</p>
-      </div>
     </div>
 
     <!-- 底部状态栏 -->
@@ -188,8 +199,8 @@ function initMap() {
   if (!mapContainer.value) return
   if (map) return
 
-  // 默认中心 (深圳)
-  const defaultCenter = [22.5, 114.0]
+  // 默认中心 (深圳世界之窗)
+  const defaultCenter = [22.537, 113.979]
 
   map = L.map(mapContainer.value, {
     center: defaultCenter,
@@ -275,6 +286,11 @@ function centerOnAircraft() {
   const { latitude, longitude } = props.telemetry.gps
   map.setView([latitude, longitude], map.getZoom())
   autoFollow.value = true
+}
+
+function startDemoMode() {
+  localStorage.setItem('mock_gps', 'true')
+  window.location.reload()
 }
 
 // 监听 telemetry 更新飞机位置

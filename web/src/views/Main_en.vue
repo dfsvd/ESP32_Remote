@@ -454,6 +454,7 @@ const telemetryT = {
 
 const mapT = {
   waitingGps: 'Waiting for GPS…',
+  demo: 'Demo',
   follow: 'Follow',
   following: 'Following',
   center: 'Center',
