@@ -593,8 +593,8 @@ void app_main(void) {
     /* ---- 5. LED 初始化 ---- */
     led_init();
 
-    /* ---- 6. 开机模式检测 (强制透穿调参模式, 跳过摇杆选择) ---- */
-    boot_mode_t mode = BOOT_MODE_PASSTHROUGH;
+    /* ---- 6. 开机模式检测 (强制 WiFi AP 模式, 跳过摇杆选择) ---- */
+    boot_mode_t mode = BOOT_MODE_WIFI;
     ESP_LOGI(TAG, ">> 强制开机模式: %s", boot_mode_name(mode));
 
     /* ---- 7. 按模式选择性初始化硬件 ---- */
