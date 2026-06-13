@@ -241,6 +241,14 @@
           :t="telemetryT"
         />
       </section>
+
+      <!-- ===== Tab: Map ===== -->
+      <section v-if="currentTab === 'map'" class="h-full">
+        <MapPanel
+          :telemetry="telemetry"
+          :t="mapT"
+        />
+      </section>
     </main>
 
     <!-- WebSocket -->
@@ -276,6 +284,7 @@ import ConfigProfiles from '../components/ConfigProfiles.vue'
 import LedConfiguratorPanel from '../components/LedConfiguratorPanel.vue'
 import ChannelBar from '../components/ChannelBar.vue'
 import TelemetryPanel from '../components/TelemetryPanel.vue'
+import MapPanel from '../components/MapPanel.vue'
 
 const {
   ws, isConnected, currentTab, configSubTab, currentLang, simMode,
@@ -443,9 +452,28 @@ const telemetryT = {
   lastUpdate: 'Last Update',
 }
 
+const mapT = {
+  waitingGps: 'Waiting for GPS…',
+  follow: 'Follow',
+  following: 'Following',
+  center: 'Center',
+  alt: 'Alt',
+  speed: 'Speed',
+  heading: 'Hdg',
+  trailOn: 'Trail ON',
+  trailOff: 'Trail',
+  clearTrail: 'Clear',
+  gaode: 'Gaode',
+  gaodeSat: 'Gaode Sat',
+  osm: 'OpenStreetMap',
+  arcgisSat: 'ArcGIS Sat',
+  tianditu: 'Tianditu',
+}
+
 const navItems = computed(() => [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'config', label: 'Config' },
+  { id: 'map', label: 'Map' },
   { id: 'led', label: 'LED' },
   { id: 'telemetry', label: 'Telemetry' },
 ])

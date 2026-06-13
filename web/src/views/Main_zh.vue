@@ -245,6 +245,14 @@
           :t="telemetryT"
         />
       </section>
+
+      <!-- ===== Tab: 地图 ===== -->
+      <section v-if="currentTab === 'map'" class="h-full">
+        <MapPanel
+          :telemetry="telemetry"
+          :t="mapT"
+        />
+      </section>
     </main>
 
     <!-- WebSocket -->
@@ -280,6 +288,7 @@ import ConfigProfiles from '../components/ConfigProfiles.vue'
 import LedConfiguratorPanel from '../components/LedConfiguratorPanel.vue'
 import ChannelBar from '../components/ChannelBar.vue'
 import TelemetryPanel from '../components/TelemetryPanel.vue'
+import MapPanel from '../components/MapPanel.vue'
 
 const {
   ws, isConnected, currentTab, configSubTab, currentLang, simMode,
@@ -447,9 +456,23 @@ const telemetryT = {
   lastUpdate: '最后更新',
 }
 
+const mapT = {
+  waitingGps: '等待 GPS 信号…',
+  follow: '跟随',
+  following: '追踪中',
+  center: '居中',
+  alt: '高度',
+  speed: '速度',
+  heading: '航向',
+  trailOn: '轨迹开',
+  trailOff: '轨迹',
+  clearTrail: '清除',
+}
+
 const navItems = computed(() => [
   { id: 'dashboard', label: '仪表盘' },
   { id: 'config', label: '配置' },
+  { id: 'map', label: '地图' },
   { id: 'led', label: '灯效' },
   { id: 'telemetry', label: '遥测' },
 ])

@@ -70,6 +70,76 @@ const availableSwitches = ['SA', 'SB', 'SC', 'SD', 'None']
 // 完整 16 通道映射原始数据 (从 MAP: 行解析)
 const fullChMap = ref(Array.from({ length: 16 }, (_, i) => i))
 
+// ========== 模拟 GPS 数据 (Phase 1: 脱机调试地图) ==========
+const MOCK_ENABLED = typeof window !== 'undefined' &&
+  (new URLSearchParams(window.location.search).get('mock') === 'true' ||
+   localStorage.getItem('mock_gps') === 'true')
+
+let _mockInterval = null
+
+/**
+ * 生成模拟 GPS 数据, 在圆形路线上飞行
+ */
+function startMockTelemetry() {
+  const CENTER_LAT = 22.5       // 深圳附近
+  const CENTER_LON = 114.0
+  const RADIUS_DEG = 0.002      // ~200m 半径
+  const ALTITUDE_M = 120        // 飞行高度 120m
+  const SPEED_MS = 12           // ~43km/h
+  const HEADING_DEG_PER_STEP = 5 // 每步转向 5°
+  const UPDATE_MS = 1000        // 每秒更新
+
+  let angle = 0     // 当前飞行方向角 (度)
+  let step = 0
+
+  if (_mockInterval) clearInterval(_mockInterval)
+
+  _mockInterval = setInterval(() => {
+    // 绕圈: 半径变化制造8字效果
+    const r = RADIUS_DEG * (1 + 0.3 * Math.sin(step * 0.05))
+    const theta = step * 0.1
+    const lat = CENTER_LAT + r * Math.cos(theta)
+    const lon = CENTER_LON + r * Math.sin(theta)
+
+    // 模拟航向 (与运动方向一致)
+    const heading = ((90 - theta * 180 / Math.PI) % 360 + 360) % 360
+
+    // 模拟卫星数 (每 20 步短暂丢失信号)
+    const sats = (step % 20 === 0 && Math.floor(step / 20) % 3 === 0) ? 0 : 12
+
+    telemetry.value = {
+      battery: { voltage: 12.6, current: 3.5, capacity: 1200, remaining: 85 },
+      gps: {
+        latitude: lat,
+        longitude: lon,
+        altitude: ALTITUDE_M + 5 * Math.sin(step * 0.2),
+        speed: SPEED_MS + 2 * Math.sin(step * 0.3),
+        heading: heading,
+        sats: sats,
+      },
+      attitude: { pitch: 2 * Math.sin(step * 0.1), roll: -3 * Math.cos(step * 0.15), yaw: heading },
+      vario: { altitude: null, vSpeed: null },
+      flightMode: 'ACRO',
+      lastUpdate: Date.now(),
+    }
+
+    angle = (angle + HEADING_DEG_PER_STEP) % 360
+    step++
+  }, UPDATE_MS)
+}
+
+function stopMockTelemetry() {
+  if (_mockInterval) {
+    clearInterval(_mockInterval)
+    _mockInterval = null
+  }
+}
+
+// 自动启动模拟 (仅开发环境或 ?mock=true)
+if (MOCK_ENABLED) {
+  startMockTelemetry()
+}
+
 // --- Telemetry ---
 const telemetry = ref(null)
 
@@ -441,10 +511,12 @@ function onCalibrationResult(results) {
         return
       }
       if (line.startsWith('TELEMETRY:')) {
-        try {
-          const raw = JSON.parse(line.slice('TELEMETRY:'.length))
-          telemetry.value = normalizeTelemetry(raw)
-        } catch (e) { console.error('TELEMETRY parse error', e) }
+        if (!MOCK_ENABLED) { // 模拟模式跳过真实遥测
+          try {
+            const raw = JSON.parse(line.slice('TELEMETRY:'.length))
+            telemetry.value = normalizeTelemetry(raw)
+          } catch (e) { console.error('TELEMETRY parse error', e) }
+        }
         return
       }
     })
