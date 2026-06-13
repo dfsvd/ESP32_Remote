@@ -163,7 +163,6 @@ const mapContainer = ref(null)
 let map = null
 let tileLayer = null
 let aircraftMarker = null
-let markerRotation = 0
 let trajectoryLine = null
 
 // 计算是否有 GPS 定位
@@ -179,19 +178,15 @@ const gpsInfo = computed(() => {
   return sats > 0 ? `${sats} 颗卫星` : ''
 })
 
-function createAircraftIcon(heading) {
-  // 带方向的飞机图标 (三角形)
-  const size = 24
-  const color = '#22c55e' // green-400
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="${color}" transform="rotate(${heading}, 12, 12)">
-    <path d="M12 2 L4 20 L12 15 L20 20 Z" stroke="white" stroke-width="1" stroke-linejoin="round"/>
-    <circle cx="12" cy="2" r="2.5" fill="white"/>
-  </svg>`
-  return L.divIcon({
-    html: svg,
-    className: 'aircraft-marker',
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
+function createAircraftMarker(lat, lon) {
+  return L.circleMarker([lat, lon], {
+    radius: 8,
+    color: '#22c55e',
+    fillColor: '#22c55e',
+    fillOpacity: 0.9,
+    weight: 2,
+    opacity: 1,
+    zIndexOffset: 1000,
   })
 }
 
@@ -222,12 +217,6 @@ function initMap() {
     }).addTo(map)
   }
 
-  // 飞机标记
-  aircraftMarker = L.marker(defaultCenter, {
-    icon: createAircraftIcon(0),
-    zIndexOffset: 1000,
-  }).addTo(map)
-
   // 飞行轨迹 Polyline (初始隐藏)
   trajectoryLine = L.polyline([], {
     color: '#22c55e',
@@ -236,6 +225,10 @@ function initMap() {
     smoothFactor: 1,
   })
   if (showTrajectory.value) trajectoryLine.addTo(map)
+
+  // 飞机圆形标记 (先放在默认中心, GPS 到后更新)
+  aircraftMarker = createAircraftMarker(defaultCenter[0], defaultCenter[1])
+  aircraftMarker.addTo(map)
 
   // 拖动地图时关闭自动跟随
   map.on('dragstart', () => {
@@ -301,22 +294,15 @@ watch(
     const { latitude, longitude, heading } = gps
     if (latitude == null || longitude == null) return
 
-    // 更新位置
+    // 更新飞机标记位置
     aircraftMarker.setLatLng([latitude, longitude])
-
-    // 更新方向
-    const hdg = heading ?? 0
-    if (Math.abs(hdg - markerRotation) > 1) {
-      markerRotation = hdg
-      aircraftMarker.setIcon(createAircraftIcon(hdg))
-    }
 
     // 自动跟随
     if (autoFollow.value) {
       map.setView([latitude, longitude], map.getZoom(), { animate: true })
     }
 
-    // 飞行轨迹: 累加点
+    // 飞行轨迹: 累加点 (从当前位置开始)
     if (!trajectoryLine) return
     trajectoryPoints.value.push([latitude, longitude])
     if (trajectoryPoints.value.length > MAX_TRAIL_POINTS) {
@@ -348,12 +334,6 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   background: #1a1a2e;
-}
-
-/* 自定义标记去除默认样式 */
-.aircraft-marker {
-  background: transparent !important;
-  border: none !important;
 }
 
 /* 暗色主题 Leaflet 调整 */
