@@ -19,6 +19,7 @@
 #include <string.h>
 #include <strings.h>
 
+
 static const char *TAG = "RC_WIFI";
 static httpd_handle_t server = NULL;
 #define CRSF_STATUS_BUF_SIZE 256
@@ -1486,8 +1487,8 @@ static void ws_broadcast_task(void *arg) {
     }
 }
 
-// 404 → 204: 静默吃掉未知请求（App 后台请求不会重试）
-static esp_err_t catchall_204_handler(httpd_req_t *req, httpd_err_code_t err) {
+// 404 → 204: 静默处理未知请求
+static esp_err_t catchall_handler(httpd_req_t *req, httpd_err_code_t err) {
     (void)err;
     httpd_resp_set_status(req, "204 No Content");
     httpd_resp_send(req, NULL, 0);
@@ -1525,23 +1526,23 @@ static void start_webserver(fpv_joystick_report_t *joy) {
                                  .user_ctx = NULL};
         httpd_register_uri_handler(server, &horiz_uri);
 
-        // favicon.ico — 浏览器自动请求，直接回 204 静默处理
+        // favicon.ico — 浏览器自动请求, 顺便用于 captive portal 检测
         httpd_uri_t favicon_uri = {.uri = "/favicon.ico",
                                    .method = HTTP_GET,
                                    .handler = favicon_handler,
                                    .user_ctx = NULL};
         httpd_register_uri_handler(server, &favicon_uri);
 
-        // generate_204 — 手机连通性检测，回 204 即可避免弹窗和反复重试
+        // generate_204 — 手机连通性检测, 不返回 204 (避免 Android 误认为有互联网)
         httpd_uri_t gen204_uri = {.uri = "/generate_204",
                                   .method = HTTP_GET,
                                   .handler = favicon_handler,
                                   .user_ctx = NULL};
         httpd_register_uri_handler(server, &gen204_uri);
 
-        // 404→204 静默处理所有未知请求
+        // 404 静默处理所有未知请求
         httpd_register_err_handler(server, HTTPD_404_NOT_FOUND,
-                                   catchall_204_handler);
+                                   catchall_handler);
 
         httpd_uri_t ws_uri = {.uri = "/ws",
                               .method = HTTP_GET,
@@ -1609,30 +1610,6 @@ void rc_wifi_server_init(fpv_joystick_report_t *joy) {
     esp_wifi_set_inactive_time(WIFI_IF_AP, 65535);
 
     ESP_LOGI(TAG, "WiFi AP 启动完成. SSID:%s", wifi_config.ap.ssid);
-
-    /* ---- DHCP 零网关配置: 手机 WiFi 只用于局域网, 蜂窝走外网 ---- */
-    esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
-    if (ap_netif) {
-        // 1. 停止 DHCP
-        ESP_ERROR_CHECK(esp_netif_dhcps_stop(ap_netif));
-
-        // 2. 清除 DHCP 网关标志 → 不发 option 3 (Router)
-        uint8_t opt_val = 0;
-        ESP_ERROR_CHECK(esp_netif_dhcps_option(
-            ap_netif, ESP_NETIF_OP_SET,
-            ESP_NETIF_ROUTER_SOLICITATION_ADDRESS,
-            &opt_val, sizeof(opt_val)));
-
-        // 3. 清除 DHCP DNS 标志 → 不发 option 6 (DNS Server)
-        ESP_ERROR_CHECK(esp_netif_dhcps_option(
-            ap_netif, ESP_NETIF_OP_SET,
-            ESP_NETIF_DOMAIN_NAME_SERVER,
-            &opt_val, sizeof(opt_val)));
-
-        // 4. 重启 DHCP
-        ESP_ERROR_CHECK(esp_netif_dhcps_start(ap_netif));
-        ESP_LOGI(TAG, "DHCP 零网关已配置: 手机 WiFi 仅局域网, 蜂窝走外网");
-    }
 
     start_webserver(joy);
 }
