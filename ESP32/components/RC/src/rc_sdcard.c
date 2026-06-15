@@ -104,6 +104,10 @@ esp_err_t sdcard_read_file(const char *path, uint8_t **buf, size_t *size) {
     return ESP_OK;
 }
 
+sdmmc_card_t *sdcard_get_card(void) {
+    return s_card;
+}
+
 bool sdcard_file_exists(const char *path) {
     if (!s_mounted || !path) return false;
     char full_path[128];

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "sdmmc_cmd.h"
 
 // ========== SPI 引脚配置 (正点原子 ESP32-S3 开发板) ==========
 #define SD_SPI_MOSI    GPIO_NUM_11
@@ -43,3 +44,8 @@ esp_err_t sdcard_read_file(const char *path, uint8_t **buf, size_t *size);
  * @brief 判断文件是否存在
  */
 bool sdcard_file_exists(const char *path);
+
+/**
+ * @brief 获取 SD 卡指针 (用于 MSC)
+ */
+sdmmc_card_t *sdcard_get_card(void);

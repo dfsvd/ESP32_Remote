@@ -24,6 +24,8 @@
 #include "rc_read.h"
 #include "rc_usb.h"
 #include "rc_wf.h"
+#include "rc_sdcard.h"
+#include "rc_usb_msc.h"
 #include "tinyusb.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -593,18 +595,29 @@ void app_main(void) {
     /* ---- 5. LED 初始化 ---- */
     led_init();
 
-    /* ---- 6. 开机模式检测 (强制 WiFi AP 模式, 跳过摇杆选择) ---- */
-    boot_mode_t mode = BOOT_MODE_WIFI;
-    ESP_LOGI(TAG, ">> 强制开机模式: %s", boot_mode_name(mode));
+    /* ---- 6. U盘模式 (调试: 跳过 WiFi, 直接进 MSC) ---- */
+    ESP_LOGI(TAG, ">> USB MSC 模式");
+    led_set_mode(LED_MODE_BLE);
 
-    /* ---- 7. 按模式选择性初始化硬件 ---- */
-    const bool passthrough_mode = (mode == BOOT_MODE_PASSTHROUGH);
-    const bool crsf_needed = (mode == BOOT_MODE_RF ||
-                              mode == BOOT_MODE_WIFI);
-    const bool crsf_always_sync = (mode == BOOT_MODE_WIFI);
-    const bool use_ble = (mode == BOOT_MODE_BLE_FPV);
-    const bool use_ble_nus = passthrough_mode;
-    const bool use_usb_host = passthrough_mode;
+    esp_err_t sdcard_ret = sdcard_mount();
+    if (sdcard_ret == ESP_OK) {
+        usb_msc_init(sdcard_get_card());
+        ESP_LOGI(TAG, "USB MSC 就绪, 请连接电脑");
+    } else {
+        ESP_LOGE(TAG, "TF 卡挂载失败, 无法进入 MSC 模式");
+    }
+
+    // USB MSC 模式: 循环等待 USB 通信, 不执行后续代码
+    ESP_LOGI(TAG, ">> MSC 模式启动完成, 请用 USB 连接电脑");
+    // 控制权交给 TinyUSB, 主循环不需要做其他事
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    // ========== 以下代码在 MSC 模式下不会执行 ==========
+    // 恢复 WiFi 模式时: 删除前面的 MSC 部分 + 取消下面的 #if 0
+#if 0
+
 
     if (crsf_needed) {
         crsf_config_t crsf_cfg = {
@@ -869,4 +882,5 @@ void app_main(void) {
 
         vTaskDelay(1);
     }
+#endif // #if 0 (MSC 模式, 跳过这段)
 }
