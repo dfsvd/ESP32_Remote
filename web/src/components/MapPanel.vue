@@ -208,6 +208,8 @@ function initMap() {
   map = L.map(mapContainer.value, {
     center: defaultCenter,
     zoom: 16,
+    minZoom: 12,
+    maxZoom: 17,
     zoomControl: false,
     attributionControl: false,
   })

@@ -1488,35 +1488,23 @@ static void ws_broadcast_task(void *arg) {
     }
 }
 
-// 404 → 204: 静默处理未知请求
+// 404 → 204: 静默处理未知请求。如果是 /tiles/... 则尝试返回离线瓦片
 static esp_err_t catchall_handler(httpd_req_t *req, httpd_err_code_t err) {
     (void)err;
-    httpd_resp_set_status(req, "204 No Content");
-    httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
-}
-
-// ========== 离线地图瓦片服务 ==========
-static esp_err_t tile_handler(httpd_req_t *req) {
+    // 尝试返回离线瓦片
     uint8_t z;
     unsigned int x, y;
-    // 解析 /tiles/{z}/{x}/{y}.png
-    if (sscanf(req->uri, "/tiles/%hhu/%u/%u.png", &z, &x, &y) != 3) {
-        httpd_resp_set_status(req, "404 Not Found");
-        httpd_resp_send(req, NULL, 0);
-        return ESP_OK;
+    if (sscanf(req->uri, "/tiles/%hhu/%u/%u.png", &z, &x, &y) == 3) {
+        uint32_t size;
+        const uint8_t *data = tile_find(z, (uint32_t)x, (uint32_t)y, &size);
+        if (data) {
+            httpd_resp_set_type(req, "image/png");
+            httpd_resp_send(req, (const char *)data, size);
+            return ESP_OK;
+        }
     }
-
-    uint32_t size;
-    const uint8_t *data = tile_find(z, (uint32_t)x, (uint32_t)y, &size);
-    if (!data) {
-        httpd_resp_set_status(req, "404 Not Found");
-        httpd_resp_send(req, NULL, 0);
-        return ESP_OK;
-    }
-
-    httpd_resp_set_type(req, "image/png");
-    httpd_resp_send(req, (const char *)data, size);
+    httpd_resp_set_status(req, "204 No Content");
+    httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
 
@@ -1565,14 +1553,7 @@ static void start_webserver(fpv_joystick_report_t *joy) {
                                   .user_ctx = NULL};
         httpd_register_uri_handler(server, &gen204_uri);
 
-        // 离线地图瓦片 /tiles/{z}/{x}/{y}.png
-        httpd_uri_t tile_uri = {.uri = "/tiles/*",
-                                .method = HTTP_GET,
-                                .handler = tile_handler,
-                                .user_ctx = NULL};
-        httpd_register_uri_handler(server, &tile_uri);
-
-        // 404 静默处理所有未知请求
+        // 404 静默处理所有未知请求 (同时处理 /tiles/... 离线瓦片)
         httpd_register_err_handler(server, HTTPD_404_NOT_FOUND,
                                    catchall_handler);
 
