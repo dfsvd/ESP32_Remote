@@ -13,6 +13,7 @@
 #include "rc_led.h"
 #include "rc_usb.h"
 #include "rc_audio.h"
+#include "rc_sdcard.h"
 #include "esp_netif.h"
 #include "tile_data.h"
 #include <ctype.h>
@@ -1488,18 +1489,31 @@ static void ws_broadcast_task(void *arg) {
     }
 }
 
-// 404 → 204: 静默处理未知请求。如果是 /tiles/... 则尝试返回离线瓦片
+// 404: 尝试离线地图瓦片 (SD卡优先 → 内嵌回退)
 static esp_err_t catchall_handler(httpd_req_t *req, httpd_err_code_t err) {
     (void)err;
-    // 尝试返回离线瓦片
     uint8_t z;
     unsigned int x, y;
     if (sscanf(req->uri, "/tiles/%hhu/%u/%u.png", &z, &x, &y) == 3) {
-        uint32_t size;
-        const uint8_t *data = tile_find(z, (uint32_t)x, (uint32_t)y, &size);
-        if (data) {
+        // 1. 优先从 SD 卡读取
+        if (sdcard_is_mounted()) {
+            char sd_path[64];
+            snprintf(sd_path, sizeof(sd_path), "/tiles/%u/%u/%u.png", z, x, y);
+            uint8_t *sd_buf;
+            size_t sd_size;
+            if (sdcard_read_file(sd_path, &sd_buf, &sd_size) == ESP_OK) {
+                httpd_resp_set_type(req, "image/png");
+                httpd_resp_send(req, (const char *)sd_buf, sd_size);
+                free(sd_buf);
+                return ESP_OK;
+            }
+        }
+        // 2. 回退到内嵌瓦片
+        uint32_t tile_size;
+        const uint8_t *tile_data = tile_find(z, (uint32_t)x, (uint32_t)y, &tile_size);
+        if (tile_data) {
             httpd_resp_set_type(req, "image/png");
-            httpd_resp_send(req, (const char *)data, size);
+            httpd_resp_send(req, (const char *)tile_data, tile_size);
             return ESP_OK;
         }
     }
@@ -1623,6 +1637,14 @@ void rc_wifi_server_init(fpv_joystick_report_t *joy) {
     esp_wifi_set_inactive_time(WIFI_IF_AP, 65535);
 
     ESP_LOGI(TAG, "WiFi AP 启动完成. SSID:%s", wifi_config.ap.ssid);
+
+    // 尝试挂载 TF 卡 (失败不影响正常启动)
+    esp_err_t sdcard_ret = sdcard_mount();
+    if (sdcard_ret == ESP_OK) {
+        ESP_LOGI(TAG, "TF 卡就绪: 地图瓦片将从 SD 卡加载");
+    } else {
+        ESP_LOGI(TAG, "无 TF 卡: 使用内嵌离线瓦片");
+    }
 
     start_webserver(joy);
 }
