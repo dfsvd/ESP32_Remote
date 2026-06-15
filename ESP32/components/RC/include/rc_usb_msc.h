@@ -1,8 +1,7 @@
 #pragma once
-#include "sdmmc_cmd.h"
 
 /**
  * @brief 初始化 USB MSC (U盘模式)
- * @param card 已挂载的 SD 卡指针
+ * 直接在内部初始化 SD 卡并暴露为 USB 存储设备
  */
-void usb_msc_init(sdmmc_card_t *card);
+void usb_msc_init(void);

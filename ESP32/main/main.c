@@ -24,7 +24,6 @@
 #include "rc_read.h"
 #include "rc_usb.h"
 #include "rc_wf.h"
-#include "rc_sdcard.h"
 #include "rc_usb_msc.h"
 #include "tinyusb.h"
 #include <ctype.h>
@@ -599,17 +598,8 @@ void app_main(void) {
     ESP_LOGI(TAG, ">> USB MSC 模式");
     led_set_mode(LED_MODE_BLE);
 
-    esp_err_t sdcard_ret = sdcard_mount();
-    if (sdcard_ret == ESP_OK) {
-        usb_msc_init(sdcard_get_card());
-        ESP_LOGI(TAG, "USB MSC 就绪, 请连接电脑");
-    } else {
-        ESP_LOGE(TAG, "TF 卡挂载失败, 无法进入 MSC 模式");
-    }
+    usb_msc_init();
 
-    // USB MSC 模式: 循环等待 USB 通信, 不执行后续代码
-    ESP_LOGI(TAG, ">> MSC 模式启动完成, 请用 USB 连接电脑");
-    // 控制权交给 TinyUSB, 主循环不需要做其他事
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

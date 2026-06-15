@@ -17,11 +17,11 @@ idf_component_register(
     REQUIRES espressif__esp_tinyusb esp_adc esp_wifi esp_http_server nvs_flash esp_netif esp_event esp_driver_gpio esp_driver_uart esp_driver_i2s bt led_strip usb
 )
 
-# TinyUSB Host 编译定义 (CDC 类驱动已禁用, 裸端点独裁, 彻底消除 DATA Toggle 冲突)
+# TinyUSB Host 编译定义 (MSC 调试模式时禁用)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
-    CFG_TUH_ENABLED=1
-    CFG_TUH_CDC=0
-    CFG_TUH_API_EDPT_XFER=1
+    # CFG_TUH_ENABLED=1
+    # CFG_TUH_CDC=0
+    # CFG_TUH_API_EDPT_XFER=1
 )
 
 # hcd_dwc2.c 需要中断处理函数声明 (CFG_TUD_ENABLED=1 时 dwc2_esp32.h 需要 dcd_int_handler)，通过 dwc2_forward.h 提供
