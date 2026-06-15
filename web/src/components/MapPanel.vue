@@ -118,6 +118,14 @@ const props = defineProps({
 // 瓦片源定义
 const tileSources = [
   {
+    key: 'local',
+    label: '离线地图',
+    url: 'http://192.168.4.1/tiles/{z}/{x}/{y}.png',
+    attribution: '',
+    subdomains: [],
+    maxZoom: 16,
+  },
+  {
     key: 'gaode',
     label: '高德地图',
     url: 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',

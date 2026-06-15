@@ -14,6 +14,7 @@
 #include "rc_usb.h"
 #include "rc_audio.h"
 #include "esp_netif.h"
+#include "tile_data.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -1495,6 +1496,30 @@ static esp_err_t catchall_handler(httpd_req_t *req, httpd_err_code_t err) {
     return ESP_OK;
 }
 
+// ========== 离线地图瓦片服务 ==========
+static esp_err_t tile_handler(httpd_req_t *req) {
+    uint8_t z;
+    unsigned int x, y;
+    // 解析 /tiles/{z}/{x}/{y}.png
+    if (sscanf(req->uri, "/tiles/%hhu/%u/%u.png", &z, &x, &y) != 3) {
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    uint32_t size;
+    const uint8_t *data = tile_find(z, (uint32_t)x, (uint32_t)y, &size);
+    if (!data) {
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_send(req, (const char *)data, size);
+    return ESP_OK;
+}
+
 // =================================================================================
 // HTTP 服务器与路由注册
 // =================================================================================
@@ -1533,12 +1558,19 @@ static void start_webserver(fpv_joystick_report_t *joy) {
                                    .user_ctx = NULL};
         httpd_register_uri_handler(server, &favicon_uri);
 
-        // generate_204 — 手机连通性检测, 不返回 204 (避免 Android 误认为有互联网)
+        // generate_204 — 手机连通性检测, 不返回 204
         httpd_uri_t gen204_uri = {.uri = "/generate_204",
                                   .method = HTTP_GET,
                                   .handler = favicon_handler,
                                   .user_ctx = NULL};
         httpd_register_uri_handler(server, &gen204_uri);
+
+        // 离线地图瓦片 /tiles/{z}/{x}/{y}.png
+        httpd_uri_t tile_uri = {.uri = "/tiles/*",
+                                .method = HTTP_GET,
+                                .handler = tile_handler,
+                                .user_ctx = NULL};
+        httpd_register_uri_handler(server, &tile_uri);
 
         // 404 静默处理所有未知请求
         httpd_register_err_handler(server, HTTPD_404_NOT_FOUND,

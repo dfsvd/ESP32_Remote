@@ -6,7 +6,7 @@ set(tinyusb_src_dir "${CMAKE_CURRENT_LIST_DIR}/../../managed_components/espressi
 
 idf_component_register(
     SRCS "src/rc_led.c" "src/rc_usb.c" "src/rc_read.c" "src/rc_wf.c" "src/rc_crsf.c" "src/rc_ble.c" "src/rc_bridge.c" "src/rc_usb_host.c"
-         "src/rc_audio.c"
+         "src/rc_audio.c" "src/tile_data.c"
          # TinyUSB Host 栈源码 (CDC 类驱动已禁用, 使用裸端点)
          "${tinyusb_src_dir}/src/host/usbh.c"
          "${tinyusb_src_dir}/src/portable/synopsys/dwc2/hcd_dwc2.c"
