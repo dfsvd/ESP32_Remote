@@ -3,7 +3,8 @@
  * FPV 遥控器 — 主入口
  *
  * 功能概要：
- *   - SA 长按 + 右摇杆方向选择启动模式 (USB Xbox / USB MSC / BLE / WiFi / 透穿调参)
+ *   - SA 长按 + 右摇杆方向选择启动模式 (USB Xbox / USB MSC / BLE / WiFi /
+ * 透穿调参)
  *   - 驱动 CRSF 协议栈与高频头通信
  *   - 自动对频状态机
  *   - 摇杆→CRSF 通道同步
@@ -20,12 +21,12 @@
 #include "rc_ble.h"
 #include "rc_bridge.h"
 #include "rc_crsf.h"
-#include "rc_usb_host.h"
 #include "rc_led.h"
 #include "rc_read.h"
 #include "rc_usb.h"
-#include "rc_wf.h"
+#include "rc_usb_host.h"
 #include "rc_usb_msc.h"
+#include "rc_wf.h"
 #include "tinyusb.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -50,7 +51,7 @@ static const char *TAG = "FPV_RC";
 #define FALLBACK_BIND_PARAM_ID 18
 #define AUTO_BIND_INTERVAL_MS 2000U
 #define AUTO_BIND_LINK_STABLE_MS 1200U
-#define BIND_TIMEOUT_MS 30000U        // 连接接收机超时
+#define BIND_TIMEOUT_MS 30000U // 连接接收机超时
 
 // ---- 开机模式切换 ----
 #define BOOT_KEY_HOLD_MS 3000             // 按键长按判定时间
@@ -62,35 +63,43 @@ static const char *TAG = "FPV_RC";
 #define BOOT_DEBOUNCE_MS 80               // 按键消抖时间
 
 // ---- RSSI 信号阈值 ----
-#define RSSI_WARN_ORG 120      // CRSF RSSI < 此值 → 播"信号弱"
-#define RSSI_WARN_RED 90       // CRSF RSSI < 此值 → 播"信号危险"
-#define RSSI_ORG_INTERVAL_MS 30000U    // 信号弱播报间隔
-#define RSSI_RED_INTERVAL_MS 10000U    // 信号危险播报间隔
+#define RSSI_WARN_ORG 120           // CRSF RSSI < 此值 → 播"信号弱"
+#define RSSI_WARN_RED 90            // CRSF RSSI < 此值 → 播"信号危险"
+#define RSSI_ORG_INTERVAL_MS 30000U // 信号弱播报间隔
+#define RSSI_RED_INTERVAL_MS 10000U // 信号危险播报间隔
 
 /* =========================================================================
  * 开机模式枚举
  * ========================================================================= */
 typedef enum {
-    BOOT_MODE_RF = 0,        // 纯射频（默认兜底）
-    BOOT_MODE_USB_FPV,       // USB 标准 HID 手柄
-    BOOT_MODE_USB_XBOX,      // USB Xbox 360 手柄
-    BOOT_MODE_BLE_FPV,       // 蓝牙 FPV HID 手柄
-    BOOT_MODE_WIFI,          // WiFi AP + WebSocket
-    BOOT_MODE_PASSTHROUGH,   // BLE NUS 透穿调参 (BLE UART ↔ CRSF MSP)
-    BOOT_MODE_USB_MSC,       // USB U盘 (MSC 存储)
-    BOOT_MODE_UNKNOWN = -1,  // 用户未做选择
+    BOOT_MODE_RF = 0,       // 纯射频（默认兜底）
+    BOOT_MODE_USB_FPV,      // USB 标准 HID 手柄
+    BOOT_MODE_USB_XBOX,     // USB Xbox 360 手柄
+    BOOT_MODE_BLE_FPV,      // 蓝牙 FPV HID 手柄
+    BOOT_MODE_WIFI,         // WiFi AP + WebSocket
+    BOOT_MODE_PASSTHROUGH,  // BLE NUS 透穿调参 (BLE UART ↔ CRSF MSP)
+    BOOT_MODE_USB_MSC,      // USB U盘 (MSC 存储)
+    BOOT_MODE_UNKNOWN = -1, // 用户未做选择
 } boot_mode_t;
 
 static const char *boot_mode_name(boot_mode_t m) {
     switch (m) {
-    case BOOT_MODE_RF:         return "纯射频";
-    case BOOT_MODE_USB_FPV:    return "USB FPV";
-    case BOOT_MODE_USB_XBOX:   return "USB Xbox";
-    case BOOT_MODE_BLE_FPV:    return "蓝牙 FPV";
-    case BOOT_MODE_WIFI:       return "WiFi AP";
-    case BOOT_MODE_PASSTHROUGH: return "透穿调参";
-    case BOOT_MODE_USB_MSC:     return "USB U盘";
-    default:                   return "未知";
+    case BOOT_MODE_RF:
+        return "纯射频";
+    case BOOT_MODE_USB_FPV:
+        return "USB FPV";
+    case BOOT_MODE_USB_XBOX:
+        return "USB Xbox";
+    case BOOT_MODE_BLE_FPV:
+        return "蓝牙 FPV";
+    case BOOT_MODE_WIFI:
+        return "WiFi AP";
+    case BOOT_MODE_PASSTHROUGH:
+        return "透穿调参";
+    case BOOT_MODE_USB_MSC:
+        return "USB U盘";
+    default:
+        return "未知";
     }
 }
 
@@ -400,7 +409,8 @@ static bool hold_keys_ms(uint32_t ms, bool check_sa, bool check_sd) {
  *   SA 短按（<3s）    → UNKNOWN
  *   无操作            → UNKNOWN
  *
- * @return 用户主动选择的模式，或 BOOT_MODE_UNKNOWN（调用方 fallback 到上次保存的模式）
+ * @return 用户主动选择的模式，或 BOOT_MODE_UNKNOWN（调用方 fallback
+ * 到上次保存的模式）
  */
 static boot_mode_t detect_boot_mode(void) {
     // 读取初始状态并消抖
@@ -414,10 +424,10 @@ static boot_mode_t detect_boot_mode(void) {
                  BOOT_KEY_HOLD_MS);
         if (hold_keys_ms(BOOT_KEY_HOLD_MS, true, false)) {
             audio_play(SOUND_MODESW);
-            ESP_LOGI(
-                TAG,
-                ">> 模式选择: 上=USB, 下=BLE, 右=U盘, 左=透穿, SD=WiFi (超时 %dms)",
-                BOOT_STICK_SELECT_TIMEOUT_MS);
+            ESP_LOGI(TAG,
+                     ">> 模式选择: 上=USB, 下=BLE, 右=U盘, 左=透穿, SD=WiFi "
+                     "(超时 %dms)",
+                     BOOT_STICK_SELECT_TIMEOUT_MS);
             uint32_t sel_start =
                 (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
             while (1) {
@@ -576,9 +586,9 @@ void app_main(void) {
 
     /* ---- 3. GPIO 配置 ---- */
     const gpio_config_t mode_select_config = {
-        .pin_bit_mask =
-            (1ULL << RC_SWITCH_SA_PIN) | (1ULL << RC_SWITCH_SD_PIN) |
-            (1ULL << RC_SWITCH_SC_PIN) | (1ULL << RC_SWITCH_SB_PIN),
+        .pin_bit_mask = (1ULL << RC_SWITCH_SA_PIN) |
+                        (1ULL << RC_SWITCH_SD_PIN) |
+                        (1ULL << RC_SWITCH_SC_PIN) | (1ULL << RC_SWITCH_SB_PIN),
         .mode = GPIO_MODE_INPUT,
         .intr_type = GPIO_INTR_DISABLE,
         .pull_up_en = true,
@@ -614,9 +624,11 @@ void app_main(void) {
     }
 
     /* ---- 8. 根据开机模式选择功能模块 ---- */
-    const bool crsf_needed = (mode == BOOT_MODE_RF || mode == BOOT_MODE_BLE_FPV ||
-                              mode == BOOT_MODE_PASSTHROUGH || mode == BOOT_MODE_WIFI);
-    const bool use_ble = (mode == BOOT_MODE_BLE_FPV || mode == BOOT_MODE_PASSTHROUGH);
+    const bool crsf_needed =
+        (mode == BOOT_MODE_RF || mode == BOOT_MODE_BLE_FPV ||
+         mode == BOOT_MODE_PASSTHROUGH || mode == BOOT_MODE_WIFI);
+    const bool use_ble =
+        (mode == BOOT_MODE_BLE_FPV || mode == BOOT_MODE_PASSTHROUGH);
     const bool use_ble_nus = (mode == BOOT_MODE_PASSTHROUGH);
     const bool use_usb_host = (mode == BOOT_MODE_PASSTHROUGH);
     const bool crsf_always_sync = (mode == BOOT_MODE_WIFI);
@@ -716,9 +728,9 @@ void app_main(void) {
     struct auto_bind_ctx bind = {0};
 
     bool prev_linked = false;
-    bool prev_sb_state = false;   // SB 解锁开关上一个状态 (false=锁)
-    bool bind_pending = false;     // 正在连接中
-    uint32_t bind_start_ms = 0;    // 开始连接的时间戳
+    bool prev_sb_state = false; // SB 解锁开关上一个状态 (false=锁)
+    bool bind_pending = false;  // 正在连接中
+    uint32_t bind_start_ms = 0; // 开始连接的时间戳
     uint32_t last_rssi_warn_ms = 0;
 
     bool printed_full_snapshot = false;
@@ -785,13 +797,13 @@ void app_main(void) {
             }
 
             /* ---- SB 解锁开关（2段拨码）边沿检测 ---- */
-            bool sb_now = (joy.aux2 > 1500);  // SB → CH6 → aux2
+            bool sb_now = (joy.aux2 > 1500); // SB → CH6 → aux2
             if (sb_now != prev_sb_state) {
                 prev_sb_state = sb_now;
                 if (sb_now) {
-                    audio_play(SOUND_ARMED);   // 打开 → 已解锁
+                    audio_play(SOUND_ARMED); // 打开 → 已解锁
                 } else {
-                    audio_play(SOUND_LOCKED);  // 关闭 → 已锁定
+                    audio_play(SOUND_LOCKED); // 关闭 → 已锁定
                 }
             }
 

@@ -146,8 +146,8 @@ function initMap() {
   if (!mapContainer.value) return
   if (map) return
 
-  // 默认中心 (华盛顿阿灵顿 — 五角大楼附近)
-  const defaultCenter = [38.91046, -77.01621]
+  // 默认中心 (深圳)
+  const defaultCenter = [22.6513, 114.0355]
 
   map = L.map(mapContainer.value, {
     center: defaultCenter,
