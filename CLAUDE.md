@@ -84,7 +84,9 @@ All source is in `ESP32/components/RC/`. Modules communicate through a shared `f
 
 - **rc_crsf** — CRSF protocol for external radio modules (ExpressLRS, etc). Supports full-duplex (separate TX/RX pins) and half-duplex (single wire). Implements menu/param system (folder, text, info, command, option item types), device info callback, telemetry parsing (battery, GPS, attitude, vario, flight mode).
 
-- **rc_wf** — WiFi AP + HTTP server + WebSocket server. Serves the embedded `index.html`, streams channel data, receives calibration/CRSF/LED commands.
+- **rc_wf** — WiFi AP + HTTP server + WebSocket server. Serves the embedded `index.html`, streams channel data, receives calibration/CRSF/LED commands. **Tile serving**: `catchall_handler` intercepts 404 → reads SD card tiles via chunked HTTP (`malloc(4KB)` + `httpd_resp_send_chunk`). Keep-Alive enabled. Server pinned to Core 0.
+
+- **rc_sdcard** (`include/rc_sdcard.h`, `src/rc_sdcard.c`) — SD/MMC card via SPI (MOSI=11, MISO=13, SCLK=12, CS=2) on SPI2_HOST. FATFS mount at `/sd`. Provides `sdcard_mount()`, `sdcard_read_file()`, `sdcard_file_exists()`. Used for offline map tiles and USB MSC mass storage.
 
 - **rc_bridge** — BLE NUS ↔ (CRSF MSP | USB CDC) bidirectional bridge. Used in passthrough mode for flight controller configuration via MSP protocol.
 
@@ -115,6 +117,7 @@ ADC (20kHz) → fpv_joystick_report_t {roll, pitch, throttle, yaw,
               ├─ BLE HID → ble_update_input(&joy) [queue-based]
               ├─ CRSF RF → sync_joy_to_crsf(&joy) [16 channels]
               ├─ WiFi WS → rc_wf broadcasts CSV to web clients
+              ├─ SD Card → catchall_handler serves tiles via HTTP chunked
               └─ Bridge  → BLE NUS ↔ USB CDC or CRSF MSP
 ```
 
@@ -141,6 +144,7 @@ components_en/          — English UI components (imported into Main_en.vue)
 - **CrsfConfiguratorPanel** — CRSF menu browser: folders, options, commands, info items.
 - **LedConfiguratorPanel** — LED mode/effect/color/brightness configurator with live preview.
 - **TelemetryPanel** — Real-time flight telemetry display (battery, GPS, attitude, vario).
+- **MapPanel** — Leaflet map with offline TMS tiles from SD card. Aircraft marker, trajectory line, auto-follow. Mock GPS mode via `?mock=true`.
 - **ChannelBar** — Compact channel value indicator bars.
 - **ConfigChannelMapping** / **ConfigChannelProps** — Switch-to-channel mapping table, EPA + REV configuration.
 - **ConfigProfiles** — Profile save/load/export/import (up to 8 profiles stored in NVS).
@@ -173,6 +177,7 @@ components_en/          — English UI components (imported into Main_en.vue)
 - `ESP32/dependencies.lock` — esp_tinyusb 2.1.1, led_strip 3.0.3, tinyusb 0.19.0~3
 - `ESP32/components/RC/include/rc_crsf.h` — CRSF link mode (half/full duplex) and UART pins
 - `ESP32/components/RC/include/rc_read.h` — ADC channels, switch GPIO pins, calibration structs, config blob (channel mapping, EPA, REV, profiles)
+- `ESP32/components/RC/include/rc_sdcard.h` — SD card SPI pins (MOSI=11, MISO=13, SCLK=12, CS=2) and FATFS mount point
 
 ## Reference Docs
 
@@ -182,3 +187,4 @@ components_en/          — English UI components (imported into Main_en.vue)
 - `docs/启动模式设计.md` — Boot mode design document
 - `docs/透穿调参模式_可行性研究报告.md` — Passthrough tuning mode feasibility study
 - `boot_mode_plan.md` — Boot mode refactoring plan
+- `docs/tile-serving.md` — Offline map tile serving (SD card, chunked HTTP, TMS format)

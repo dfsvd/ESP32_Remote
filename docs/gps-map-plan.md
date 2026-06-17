@@ -1,150 +1,108 @@
-# GPS 地图功能 — 方案评估与执行计划
+# GPS 地图功能 — 实现文档
+
+> 📌 本文档最初是方案评估，记录最终实现供后续维护参考。
 
 ## 背景
 
-目前系统已具备完整的 GPS 数据链路：
+系统已具备完整的 GPS 数据链路：
 
-1. **数据源**：CRSF 遥测帧 (0x02) → `crsf_state_t.telemetry.gps` (`rc_crsf.c:690`)
-2. **WebSocket 推送**：`rc_wf.c` 的 `ws_broadcast_task` 以 20Hz 频率广播 `TELEMETRY:{"gps":{"lat":223456789,"lon":114123456,...}}` (`rc_wf.c:239-263`)
-3. **前端接收**：`useRCState.js` 中 `normalizeTelemetry()` 已解析 GPS 数据并做精度归一化（纬度/经度 `/1e7`）
-4. **当前展示**：`TelemetryPanel.vue` 以文本形式显示经纬度、高度、速度等
-
-目标：在 Web 前端增加地图，显示飞机当前位置 + 飞行轨迹。
+1. **数据源**：CRSF 遥测帧 (0x02) → `crsf_state_t.telemetry.gps` (`rc_crsf.c`)
+2. **WebSocket 推送**：`rc_wf.c` 的 `ws_broadcast_task` 以 20Hz 广播 `TELEMETRY:{...}`
+3. **前端接收**：`useRCState.js` 中 `normalizeTelemetry()` 解析 GPS 数据
+4. **地图展示**：`MapPanel.vue` Leaflet 地图 + 实时飞机位置 + 飞行轨迹
 
 ---
 
-## 方案一：在线版本 ⭐ 推荐
+## 最终架构 (已实现)
 
-### 核心思路
+### 数据流
 
-**不需要 ESP32 做代理或中继。** 手机/笔记本连接遥控器 WiFi AP 后，浏览器直接通过手机蜂窝网络加载地图瓦片。
-
-现代手机的行为：连接到一个没有互联网的 WiFi 热点时，**浏览器仍可以使用蜂窝数据**访问互联网。遥控器已经实现了 Captive Portal DNS 重定向（`rc_wf.c:48-161` 的 DNS 任务），手机不会因"无网络"而断开 WiFi。
-
-所以数据流是双通道：
 ```
-GPS 位置: ESP32 (WebSocket) ────WiFi AP────→ 浏览器 (192.168.4.1/ws)
-地图瓦片: OpenStreetMap/CDN    ──蜂窝数据──→ 浏览器 (直接 HTTP)
+CRSF 遥测 → WebSocket → useRCState.js → MapPanel.vue (Leaflet)
+                                           │
+SD卡 SASPlanet TMS 瓦片 ← HTTP chunked ← ESP32 catchall_handler
 ```
 
-### 对 ESP32 固件的改动
+**关键决策**：离线 SD 卡方案。不依赖手机蜂窝网络，ESSP32 自建 WiFi AP 承载 Web UI + 瓦片服务。
 
-**零改动（Phase 1-4）。** 不需要：
-- 开启 STA 模式
-- 配置代理
-- 修改 WebSocket 协议
-- 增加 filesystem 支持
-- 增加任何硬件
+### 组件关系
 
-### 对 Web 前端的改动
-
-1. **新增 npm 依赖**：`leaflet`
-2. **新增组件**：`MapPanel.vue` / `MapPanel_en.vue`
-3. **新增导航 Tab**：在 `Main_en.vue` / `Main_zh.vue` 的 `navItems` 中增加 `map` 选项卡
-4. **路由不变**（视图切换由 `currentTab` 控制，不涉及 Hash Router）
-
-### 优势
-
-- 实现极简单（只改前端）
-- 地图无限区域、无限缩放级别
-- 地图永远最新
-- 不需要额外硬件
-- 手机不需要装任何 App
-
-### 劣势
-
-- 需要蜂窝网络覆盖（飞场无信号则无法加载地图）
-- OSM 瓦片在国内可能加载慢，需备选高德/天地图源
-
-### 国内地图源替代方案
-
-| 地图源 | URL 模板 | 要求 |
-|--------|----------|------|
-| 天地图 | `https://t0.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=YOUR_KEY` | 免费申请 Key |
-| 高德地图 | `https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}` | 通常可直接使用 |
-| ArcGIS 卫星 | `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}` | 卫星图，可直接使用 |
-
----
-
-## 方案二：离线版本（TF 卡）
-
-### 需要做的事情
-
-1. **硬件**：需确认 PCB 是否有 TF 卡槽可用引脚。
-2. **ESP32 固件改动**：
-   - 添加 `esp_driver_sdspi` 驱动 + FATFS VFS 挂载
-   - HTTP server 中增加 `/tiles/{z}/{x}/{y}.png` 路由，从 SD 卡读取
-   - **建议开启 PSRAM**
-3. **离线地图制作**：用户需用 MOBAC 等工具下载瓦片到 TF 卡
-
-### 劣势
-
-- 硬件不确定（需确认 PCB 是否有 TF 卡设计）
-- 开发量大（固件大面积改动）
-- 使用门槛高（用户需制作 TF 卡）
-- 地图区域有限、可能过时
-- 当前无 PSRAM，RAM 仅 512KB
-
----
-
-## 推荐方案：在线版本（方案一）
-
-| 维度 | 在线 | 离线 |
+| 组件 | 文件 | 职责 |
 |------|------|------|
-| 开发成本 | 低（只改前端） | 高（硬件+固件+前端） |
-| 用户体验 | 插电即用 | 需制作 TF 卡 |
-| 地图覆盖 | 全球 | 有限区域 |
-| 维护成本 | 零 | 需更新地图 |
-| 硬件依赖 | 无 | 需 SD 卡槽 |
+| 地图面板 | `MapPanel.vue` | Leaflet 地图容器、飞机标记、轨迹、自动跟随 |
+| 模拟 GPS | `useRCState.js` | `?mock=true` 激活，在深圳绕 8 字飞行 |
+| 瓦片服务 | `rc_wf.c` | catchall_handler chunked 流式发送 |
+| SD 卡驱动 | `rc_sdcard.c` | SPI+FATFS 挂载 TF 卡 |
+| 遥测推送 | `rc_wf.c` | WebSocket 广播 CRSF 遥测数据 |
+
+### 离线瓦片服务
+
+详见 [`tile-serving.md`](tile-serving.md)。
+
+核心要点：
+- SASPlanet 导出 **TMS 格式**瓦片到 SD 卡 `/tiles/{z}/{x}/{y}.png`
+- ESP32 用 `fopen + 4KB chunked 流式发送`，不 `malloc` 整个文件
+- Leaflet 配置 `tms: true` 适配 TMS 坐标
+- Keep-Alive 减少 TCP 建连开销
 
 ---
 
-## 执行计划（分阶段增量推进）
+## 实现过程
 
-### Phase 1：模拟 GPS 数据
+### Phase 1：模拟 GPS 数据 ✓
 
-> **目标**：在 `useRCState.js` 中增加模拟 GPS 数据模块，完全解耦高频头。
+`useRCState.js` 中 `startMockTelemetry()`：
+- 深圳中心 (22.6513, 114.0355)，半径 0.05° 8 字飞行
+- 120m 高度，~43km/h 速度
+- 每 20 步模拟 1 次卫星丢失（GPS 信号测试）
+- 通过 `?mock=true` 或 `localStorage` 激活
 
-- 增加 `enableMockTelemetry()` 函数
-- 初始位置：深圳某地 (lat=22.5, lon=114.0)
-- 模拟绕圈/8字飞行，每秒更新，每次 ~10m
-- 通过 `?mock=true` 激活
-- 不影响正式 WebSocket 连接逻辑
+### Phase 2：前端地图展示 ✓
 
-### Phase 2：前端地图展示
+- `npm install leaflet` → `MapPanel.vue`
+- 圆形飞机标记 (`L.circleMarker`)
+- 自动跟随 / 居中 / 轨迹开关
+- 底部状态栏（卫星数、高度、速度、航向）
+- GPS 丢失时显示"等待 GPS 信号"提示
 
-> **目标**：Leaflet 地图 + 实时飞机位置。不依赖固件。
+### Phase 3：飞行轨迹 ✓
 
-1. `npm install leaflet`
-2. 创建 `MapPanel.vue` / `MapPanel_en.vue`
-3. 瓦片源（默认高德，可切换）
-4. 飞机标记（lat/lon → Leaflet marker）
-5. 自动跟随模式
-6. GPS 丢失时显示"等待 GPS 信号"
-7. 添加到导航 Tab
+- `L.polyline` 累积 GPS 点
+- 最多 2000 点，自动裁剪
+- 清除轨迹按钮
 
-### Phase 3：网络兼容（仅在需要时）
+### Phase 4：离线瓦片服务 ✓
 
-如果手机蜂窝无法加载瓦片（DNS 被 captive portal 拦截）：
-- `rc_wf.c` DNS 处理：未知域名 rcode=5（REFUSED）而非 NXDOMAIN
+| 步骤 | 详情 |
+|------|------|
+| SD 卡 | SPI 模式 (MOSI=11, MISO=13, SCLK=12, CS=2) |
+| 文件系统 | FATFS, 挂载点 `/sd` |
+| 瓦片路径 | `/tiles/{z}/{x}/{y}.png` |
+| HTTP 服务 | catchall_handler (404 error handler) |
+| 读取方式 | `fopen` + `fread(4KB)` + `httpd_resp_send_chunk` |
+| 性能优化 | Core 0 隔离、Keep-Alive、8KB 栈 |
 
-### Phase 4：飞行轨迹
+### Phase 5：在线源切换 ✗（已废弃）
 
-- 前端累积 GPS 点数组 → Leaflet Polyline
-- 最多 2000 点，自动裁剪旧点
-- 轨迹颜色渐变
-- 清除按钮
-
-### Phase 5（可选）：笔记本 AP+STA
-
-- ESP32 同时 AP + STA 模式
-- 通过 STA 代理瓦片请求
+最初设计了高德/OSM 等在线瓦片源切换，因以下原因废弃：
+- 飞场常无蜂窝信号
+- 增加前端复杂度
+- 最终决定纯离线方案
 
 ---
 
 ## 验证方法
 
-1. **本地开发**：`npm run dev?mock=true` 模拟 GPS 数据测试
-2. **手机验证**：连遥控器 WiFi → 地图 Tab → 瓦片加载确认
+1. **本地开发**：`npm run dev && open http://localhost:5174/zh?mock=true`
+2. **手机验证**：连 DARWINFPV_WIFI → 地图 Tab → 瓦片加载
 3. **飞行验证**：飞场实测位置更新 + 轨迹记录
-4. **切换测试**：高德/天地图/OSM 不同源效果对比
+
+---
+
+## 相关文档
+
+- [`tile-serving.md`](tile-serving.md) — 离线瓦片服务架构与性能优化
+- `MapPanel.vue` — 前端地图实现
+- `useRCState.js` — 模拟 GPS 与遥测状态管理
+- `rc_wf.c` — catchall_handler + WebSocket 广播
+- `rc_sdcard.c` — SD 卡挂载与 FATFS 封装
