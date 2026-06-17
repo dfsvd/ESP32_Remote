@@ -1488,29 +1488,56 @@ static void ws_broadcast_task(void *arg) {
     }
 }
 
-// 404: 尝试离线地图瓦片 (SD 卡读取, 失败自动重试)
-#define TILE_READ_RETRY_MAX  5   // 单次瓦片请求最大尝试次数
+// 404: 尝试离线地图瓦片 (SD 卡 fopen + chunked 流式发送, 不 malloc 整个文件)
+#define TILE_OPEN_RETRY_MAX  5
 
 static esp_err_t catchall_handler(httpd_req_t *req, httpd_err_code_t err) {
     (void)err;
     uint8_t z;
     unsigned int x, y;
-    if (sscanf(req->uri, "/tiles/%hhu/%u/%u.png", &z, &x, &y) == 3 && sdcard_is_mounted()) {
-        char sd_path[64];
-        snprintf(sd_path, sizeof(sd_path), "/tiles/%u/%u/%u.png", z, x, y);
-        for (int attempt = 0; attempt < TILE_READ_RETRY_MAX; attempt++) {
-            uint8_t *sd_buf;
-            size_t sd_size;
-            if (sdcard_read_file(sd_path, &sd_buf, &sd_size) == ESP_OK) {
-                httpd_resp_set_type(req, "image/png");
-                httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
-                httpd_resp_send(req, (const char *)sd_buf, sd_size);
-                free(sd_buf);
-                return ESP_OK;
-            }
-            vTaskDelay(pdMS_TO_TICKS(10));  // 等 SPI 释放后重试
+    if (sscanf(req->uri, "/tiles/%hhu/%u/%u.png", &z, &x, &y) != 3 || !sdcard_is_mounted()) {
+        goto not_found;
+    }
+
+    // 构造 SD 卡文件路径
+    char full_path[128];
+    snprintf(full_path, sizeof(full_path), "%s/tiles/%u/%u/%u.png",
+             SD_MOUNT_POINT, z, x, y);
+
+    // 打开文件 (ADC 可能抢占 SPI, 重试)
+    FILE *f = NULL;
+    for (int attempt = 0; attempt < TILE_OPEN_RETRY_MAX; attempt++) {
+        f = fopen(full_path, "rb");
+        if (f) break;
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (!f) goto not_found;
+
+    // 分块流式发送 — 512B 栈上 buffer (FAT sector=512, 够用且不爆栈)
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
+
+    char buf[512];
+    size_t n;
+    bool complete = true;
+
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) {
+            complete = false;
+            break;
         }
     }
+
+    // ferror → SPI 读取断裂, 丢弃本次请求 (不发送 chunked 终结标记)
+    if (complete && !ferror(f)) {
+        httpd_resp_send_chunk(req, NULL, 0);  // 正常终结
+    }
+    // 否则浏览器收不到 0\r\n\r\n → 不渲染损坏数据 → Leaflet 自动重试
+
+    fclose(f);
+    return ESP_OK;
+
+not_found:
     httpd_resp_set_status(req, "204 No Content");
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
@@ -1525,6 +1552,8 @@ static void start_webserver(fpv_joystick_report_t *joy) {
     config.max_open_sockets = 13;
     config.lru_purge_enable = true;
     config.send_wait_timeout = 5;
+    config.stack_size = 8192;  // catchall_handler 内有 fopen 调用链, 默认 4K 不够
+    config.core_id = 0;  // 绑定 Core 0, 与 Core 1 的 ADC/CRSF 物理隔离
 
     ESP_LOGI(TAG, "启动 HTTP 服务器，端口: %d", config.server_port);
     if (httpd_start(&server, &config) == ESP_OK) {
