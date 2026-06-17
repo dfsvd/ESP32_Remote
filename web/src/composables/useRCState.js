@@ -81,9 +81,9 @@ let _mockInterval = null
  * 生成模拟 GPS 数据, 在圆形路线上飞行
  */
 function startMockTelemetry() {
-  const CENTER_LAT = 22.537
-  const CENTER_LON = 113.979
-  const RADIUS_DEG = 0.002      // ~200m 半径
+  const CENTER_LAT = 38.91046
+  const CENTER_LON = -77.01621
+  const RADIUS_DEG = 0.04       // ~4.5km 半径 (8字轨迹最大直径 ≈9km)
   const ALTITUDE_M = 120        // 飞行高度 120m
   const SPEED_MS = 12           // ~43km/h
   const HEADING_DEG_PER_STEP = 5 // 每步转向 5°

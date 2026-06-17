@@ -146,8 +146,8 @@ function initMap() {
   if (!mapContainer.value) return
   if (map) return
 
-  // 默认中心 (深圳世界之窗)
-  const defaultCenter = [22.537, 113.979]
+  // 默认中心 (华盛顿阿灵顿 — 五角大楼附近)
+  const defaultCenter = [38.91046, -77.01621]
 
   map = L.map(mapContainer.value, {
     center: defaultCenter,
@@ -161,12 +161,13 @@ function initMap() {
   // 缩放控件放到左下角
   L.control.zoom({ position: 'bottomleft' }).addTo(map)
 
-  // 离线地图瓦片 (从 ESP32 固件 HTTP 服务加载)
+  // 离线地图瓦片 (从 ESP32 TF 卡 HTTP 服务加载, SASPlanet TMS 格式)
   tileLayer = L.tileLayer(LOCAL_TILE_URL, {
     attribution: '',
     subdomains: [],
     maxZoom: 17,
     keepBuffer: 5,
+    tms: true,  // SASPlanet 导出为 TMS 格式 (Y 轴与 XYZ 相反)
   }).addTo(map)
 
   // 飞行轨迹 Polyline (初始隐藏)

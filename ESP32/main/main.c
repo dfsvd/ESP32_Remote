@@ -97,7 +97,7 @@ static const char *boot_mode_name(boot_mode_t m) {
 static boot_mode_t get_default_mode(void) {
     // TODO: 将来从 NVS 读取上次保存的模式
     // return nvs_read_boot_mode(BOOT_MODE_WIFI);
-    return BOOT_MODE_WIFI;
+    return BOOT_MODE_USB_MSC;
 }
 
 /* =========================================================================
