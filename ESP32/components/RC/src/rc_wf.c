@@ -17,6 +17,7 @@
 #include "esp_netif.h"
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -1513,20 +1514,26 @@ static esp_err_t catchall_handler(httpd_req_t *req, httpd_err_code_t err) {
     }
     if (!f) goto not_found;
 
-    // 分块流式发送 — 512B 栈上 buffer (FAT sector=512, 够用且不爆栈)
+    // 4KB heap buffer (multi-block CMD18, SPI 事务从 300 次降到 38 次)
+    char *buf = (char *)malloc(4096);
+    if (!buf) { fclose(f); goto not_found; }
+
     httpd_resp_set_type(req, "image/png");
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
+    httpd_resp_set_hdr(req, "Connection", "keep-alive");
+    httpd_resp_set_hdr(req, "Keep-Alive", "timeout=5, max=100");
 
-    char buf[512];
     size_t n;
     bool complete = true;
 
-    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+    while ((n = fread(buf, 1, 4096, f)) > 0) {
         if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) {
             complete = false;
             break;
         }
     }
+
+    free(buf);
 
     // ferror → SPI 读取断裂, 丢弃本次请求 (不发送 chunked 终结标记)
     if (complete && !ferror(f)) {
