@@ -3,11 +3,12 @@
  * FPV 遥控器 — 主入口
  *
  * 功能概要：
- *   - 根据 GPIO 拨码开关决定运行模式 (USB / BLE / WiFi / 纯射频)
+ *   - SA 长按 + 右摇杆方向选择启动模式 (USB Xbox / USB MSC / BLE / WiFi / 透穿调参)
  *   - 驱动 CRSF 协议栈与高频头通信
  *   - 自动对频状态机
  *   - 摇杆→CRSF 通道同步
  *   - USB HID 手柄输出 (含 Xbox 模式)
+ *   - USB MSC U盘模式 (TF 卡直读)
  * ========================================================================= */
 
 #include "driver/gpio.h"
@@ -76,6 +77,7 @@ typedef enum {
     BOOT_MODE_BLE_FPV,       // 蓝牙 FPV HID 手柄
     BOOT_MODE_WIFI,          // WiFi AP + WebSocket
     BOOT_MODE_PASSTHROUGH,   // BLE NUS 透穿调参 (BLE UART ↔ CRSF MSP)
+    BOOT_MODE_USB_MSC,       // USB U盘 (MSC 存储)
     BOOT_MODE_UNKNOWN = -1,  // 用户未做选择
 } boot_mode_t;
 
@@ -87,14 +89,15 @@ static const char *boot_mode_name(boot_mode_t m) {
     case BOOT_MODE_BLE_FPV:    return "蓝牙 FPV";
     case BOOT_MODE_WIFI:       return "WiFi AP";
     case BOOT_MODE_PASSTHROUGH: return "透穿调参";
+    case BOOT_MODE_USB_MSC:     return "USB U盘";
     default:                   return "未知";
     }
 }
 
 static boot_mode_t get_default_mode(void) {
     // TODO: 将来从 NVS 读取上次保存的模式
-    // return nvs_read_boot_mode(BOOT_MODE_RF);
-    return BOOT_MODE_RF;
+    // return nvs_read_boot_mode(BOOT_MODE_WIFI);
+    return BOOT_MODE_WIFI;
 }
 
 /* =========================================================================
@@ -413,7 +416,7 @@ static boot_mode_t detect_boot_mode(void) {
             audio_play(SOUND_MODESW);
             ESP_LOGI(
                 TAG,
-                ">> 模式选择: 上=USB, 下=BLE, 右=RF, 左=透穿, SD=WiFi (超时 %dms)",
+                ">> 模式选择: 上=USB, 下=BLE, 右=U盘, 左=透穿, SD=WiFi (超时 %dms)",
                 BOOT_STICK_SELECT_TIMEOUT_MS);
             uint32_t sel_start =
                 (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
@@ -448,9 +451,9 @@ static boot_mode_t detect_boot_mode(void) {
                     return BOOT_MODE_BLE_FPV;
                 }
                 if (roll > BOOT_STICK_RIGHT_THRESH) {
-                    ESP_LOGI(TAG, ">> 右摇杆右 → 进入纯射频模式");
-                    audio_play_wait(SOUND_RFMOD, 5000);
-                    return BOOT_MODE_RF;
+                    ESP_LOGI(TAG, ">> 右摇杆右 → 进入 USB U盘模式");
+                    audio_play_wait(SOUND_USBMOD, 5000);
+                    return BOOT_MODE_USB_MSC;
                 }
                 if (roll < BOOT_STICK_LEFT_THRESH) {
                     ESP_LOGI(TAG, ">> 右摇杆左 → 进入透穿调参模式");
@@ -594,20 +597,29 @@ void app_main(void) {
     /* ---- 5. LED 初始化 ---- */
     led_init();
 
-    /* ---- 6. U盘模式 (调试: 跳过 WiFi, 直接进 MSC) ---- */
-    ESP_LOGI(TAG, ">> USB MSC 模式");
-    led_set_mode(LED_MODE_BLE);
+    /* ---- 6. 检测开机模式 ---- */
+    boot_mode_t mode = detect_boot_mode();
+    if (mode == BOOT_MODE_UNKNOWN)
+        mode = get_default_mode();
+    ESP_LOGI(TAG, "开机模式: %s", boot_mode_name(mode));
 
-    usb_msc_init();
-
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+    /* ---- 7. USB U盘模式 (MSC) — 右摇杆右选择 ---- */
+    if (mode == BOOT_MODE_USB_MSC) {
+        ESP_LOGI(TAG, ">> USB MSC 模式");
+        led_set_mode(LED_MODE_BLE);
+        usb_msc_init();
+        while (1) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
     }
 
-    // ========== 以下代码在 MSC 模式下不会执行 ==========
-    // 恢复 WiFi 模式时: 删除前面的 MSC 部分 + 取消下面的 #if 0
-#if 0
-
+    /* ---- 8. 根据开机模式选择功能模块 ---- */
+    const bool crsf_needed = (mode == BOOT_MODE_RF || mode == BOOT_MODE_BLE_FPV ||
+                              mode == BOOT_MODE_PASSTHROUGH || mode == BOOT_MODE_WIFI);
+    const bool use_ble = (mode == BOOT_MODE_BLE_FPV || mode == BOOT_MODE_PASSTHROUGH);
+    const bool use_ble_nus = (mode == BOOT_MODE_PASSTHROUGH);
+    const bool use_usb_host = (mode == BOOT_MODE_PASSTHROUGH);
+    const bool crsf_always_sync = (mode == BOOT_MODE_WIFI);
 
     if (crsf_needed) {
         crsf_config_t crsf_cfg = {
@@ -872,5 +884,4 @@ void app_main(void) {
 
         vTaskDelay(1);
     }
-#endif // #if 0 (MSC 模式, 跳过这段)
 }

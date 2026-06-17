@@ -53,7 +53,7 @@ python tools/capture_msp.py  # Capture Betaflight MSP communication for debuggin
 
 Two independent sub-projects: **ESP32 firmware** (`ESP32/`) and **Web frontend** (`web/`). The web UI is compiled into a single `index.html` via `vite-plugin-singlefile` and embedded directly into the ESP32 firmware binary at compile time. No SPIFFS upload needed.
 
-The firmware implements an **FPV RC controller** with multiple output modes (USB HID, BLE HID, CRSF RF), a **bridge mode** (BLE NUS ↔ USB CDC / CRSF MSP) for flight controller passthrough, and a WiFi AP for configuration. Target hardware: ESP32-S3.
+The firmware implements an **FPV RC controller** with multiple output modes (USB HID, USB MSC, BLE HID, CRSF RF), a **bridge mode** (BLE NUS ↔ USB CDC / CRSF MSP) for flight controller passthrough, and a WiFi AP for configuration. Target hardware: ESP32-S3.
 
 ## Boot Modes
 
@@ -63,10 +63,10 @@ Mode selection at startup: hold SA button for 3s, then use right stick to choose
 |-----------|------|-------------|
 | Stick Up | USB Xbox | Xbox 360 controller via TinyUSB HID |
 | Stick Down | BLE FPV | BLE HID gamepad via NimBLE ("FPV RC BLE V2") |
-| Stick Right | Pure RF | CRSF only, no USB/BLE/WiFi |
+| Stick Right | USB MSC | USB U盘 (Mass Storage) — TF卡直读 |
 | Stick Left | Passthrough | BLE NUS ↔ USB CDC bridge to flight controller |
 | SD Button | WiFi AP | WiFi AP + WebSocket config page |
-| Timeout | RF (default) | Falls back to last saved mode or pure RF |
+| Timeout | WiFi (default) | Falls back to WiFi AP mode |
 
 Auto-bind: when CRSF link is not connected, the firmware periodically sends bind commands via CRSF menu system until the receiver links up.
 
