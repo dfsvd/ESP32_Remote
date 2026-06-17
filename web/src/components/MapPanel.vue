@@ -28,15 +28,6 @@
 
     <!-- 右上角控制栏 -->
     <div class="absolute top-3 right-3 z-[1000] flex flex-col gap-2">
-      <!-- 地图源切换 -->
-      <select
-        v-model="tileSource"
-        @change="switchTileLayer"
-        class="px-3 py-1.5 text-xs font-bold rounded-lg bg-darwin-panel/90 backdrop-blur border border-[var(--theme-border)] text-darwin-ink outline-none cursor-pointer shadow-lg"
-      >
-        <option v-for="src in tileSources" :key="src.key" :value="src.key">{{ src.label }}</option>
-      </select>
-
       <!-- 自动跟随切换 -->
       <button
         type="button"
@@ -115,54 +106,7 @@ const props = defineProps({
   t: { type: Object, default: () => ({}) },
 })
 
-// 瓦片源定义
-const tileSources = [
-  {
-    key: 'local',
-    label: '离线地图',
-    url: 'http://192.168.4.1/tiles/{z}/{x}/{y}.png',
-    attribution: '',
-    subdomains: [],
-    maxZoom: 16,
-  },
-  {
-    key: 'gaode',
-    label: '高德地图',
-    url: 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
-    attribution: '&copy; 高德地图',
-    subdomains: ['1', '2', '3', '4'],
-  },
-  {
-    key: 'gaode_sat',
-    label: '高德卫星',
-    url: 'https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}',
-    attribution: '&copy; 高德地图',
-    subdomains: ['1', '2', '3', '4'],
-  },
-  {
-    key: 'osm',
-    label: 'OpenStreetMap',
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
-    subdomains: ['a', 'b', 'c'],
-  },
-  {
-    key: 'arcgis_sat',
-    label: 'ArcGIS 卫星',
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: '&copy; Esri',
-    subdomains: [],
-  },
-  {
-    key: 'tianditu',
-    label: '天地图',
-    url: 'https://t0.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=',
-    attribution: '&copy; 天地图',
-    subdomains: [],
-  },
-]
-
-const tileSource = ref('gaode')
+const LOCAL_TILE_URL = 'http://192.168.4.1/tiles/{z}/{x}/{y}.png'
 const autoFollow = ref(true)
 const showTrajectory = ref(true)
 const trajectoryPoints = ref([])
@@ -217,15 +161,12 @@ function initMap() {
   // 缩放控件放到左下角
   L.control.zoom({ position: 'bottomleft' }).addTo(map)
 
-  // 初始瓦片层
-  const src = tileSources.find(s => s.key === tileSource.value)
-  if (src) {
-    tileLayer = L.tileLayer(src.url, {
-      attribution: src.attribution,
-      subdomains: src.subdomains,
-      maxZoom: 19,
-    }).addTo(map)
-  }
+  // 离线地图瓦片 (从 ESP32 固件 HTTP 服务加载)
+  tileLayer = L.tileLayer(LOCAL_TILE_URL, {
+    attribution: '',
+    subdomains: [],
+    maxZoom: 17,
+  }).addTo(map)
 
   // 飞行轨迹 Polyline (初始隐藏)
   trajectoryLine = L.polyline([], {
@@ -247,18 +188,6 @@ function initMap() {
 
   // 延迟修复尺寸 (解决容器刚显示时的渲染问题)
   setTimeout(() => map.invalidateSize(), 200)
-}
-
-function switchTileLayer() {
-  if (!map) return
-  const src = tileSources.find(s => s.key === tileSource.value)
-  if (!src) return
-  if (tileLayer) map.removeLayer(tileLayer)
-  tileLayer = L.tileLayer(src.url, {
-    attribution: src.attribution,
-    subdomains: src.subdomains,
-    maxZoom: 19,
-  }).addTo(map)
 }
 
 function toggleFollow() {

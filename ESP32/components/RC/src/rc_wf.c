@@ -15,7 +15,6 @@
 #include "rc_audio.h"
 #include "rc_sdcard.h"
 #include "esp_netif.h"
-#include "tile_data.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -1507,14 +1506,6 @@ static esp_err_t catchall_handler(httpd_req_t *req, httpd_err_code_t err) {
                 free(sd_buf);
                 return ESP_OK;
             }
-        }
-        // 2. 回退到内嵌瓦片
-        uint32_t tile_size;
-        const uint8_t *tile_data = tile_find(z, (uint32_t)x, (uint32_t)y, &tile_size);
-        if (tile_data) {
-            httpd_resp_set_type(req, "image/png");
-            httpd_resp_send(req, (const char *)tile_data, tile_size);
-            return ESP_OK;
         }
     }
     httpd_resp_set_status(req, "204 No Content");
