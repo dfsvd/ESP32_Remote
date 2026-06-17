@@ -166,6 +166,7 @@ function initMap() {
     attribution: '',
     subdomains: [],
     maxZoom: 17,
+    keepBuffer: 5,
   }).addTo(map)
 
   // 飞行轨迹 Polyline (初始隐藏)

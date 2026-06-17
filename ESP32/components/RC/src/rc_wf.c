@@ -1488,24 +1488,27 @@ static void ws_broadcast_task(void *arg) {
     }
 }
 
-// 404: 尝试离线地图瓦片 (SD卡优先 → 内嵌回退)
+// 404: 尝试离线地图瓦片 (SD 卡读取, 失败自动重试)
+#define TILE_READ_RETRY_MAX  5   // 单次瓦片请求最大尝试次数
+
 static esp_err_t catchall_handler(httpd_req_t *req, httpd_err_code_t err) {
     (void)err;
     uint8_t z;
     unsigned int x, y;
-    if (sscanf(req->uri, "/tiles/%hhu/%u/%u.png", &z, &x, &y) == 3) {
-        // 1. 优先从 SD 卡读取
-        if (sdcard_is_mounted()) {
-            char sd_path[64];
-            snprintf(sd_path, sizeof(sd_path), "/tiles/%u/%u/%u.png", z, x, y);
+    if (sscanf(req->uri, "/tiles/%hhu/%u/%u.png", &z, &x, &y) == 3 && sdcard_is_mounted()) {
+        char sd_path[64];
+        snprintf(sd_path, sizeof(sd_path), "/tiles/%u/%u/%u.png", z, x, y);
+        for (int attempt = 0; attempt < TILE_READ_RETRY_MAX; attempt++) {
             uint8_t *sd_buf;
             size_t sd_size;
             if (sdcard_read_file(sd_path, &sd_buf, &sd_size) == ESP_OK) {
                 httpd_resp_set_type(req, "image/png");
+                httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
                 httpd_resp_send(req, (const char *)sd_buf, sd_size);
                 free(sd_buf);
                 return ESP_OK;
             }
+            vTaskDelay(pdMS_TO_TICKS(10));  // 等 SPI 释放后重试
         }
     }
     httpd_resp_set_status(req, "204 No Content");
