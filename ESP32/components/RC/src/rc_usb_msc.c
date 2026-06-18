@@ -3,57 +3,39 @@
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
 #include "tinyusb_msc.h"
-#include "sdmmc_cmd.h"
-#include "driver/sdmmc_host.h"
 
 static const char *TAG = "USB_MSC";
 
 void usb_msc_init(void) {
-    ESP_LOGI(TAG, "初始化 USB MSC (TF卡 → U盘, SDMMC 1-bit)...");
+    ESP_LOGI(TAG, "初始化 USB MSC (TF卡 → U盘)...");
 
-    // 1. 初始化 SDMMC 宿主机 + 卡槽
-    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-    host.slot = SDMMC_HOST_SLOT_1;
+    // 1. 通过 rc_sdcard 模块挂载 SD 卡 (复用 SDMMC 初始化, 避免重复)
+    esp_err_t ret = sdcard_mount();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SD 卡挂载失败, MSC 无法启动");
+        return;
+    }
 
-    sdmmc_slot_config_t slot_config = {
-        .clk   = SDMMC_CLK,      // 47
-        .cmd   = SDMMC_CMD,      // 48
-        .d0    = SDMMC_D0,       // 21
-        .d1    = GPIO_NUM_NC,
-        .d2    = GPIO_NUM_NC,
-        .d3    = GPIO_NUM_NC,
-        .d4    = GPIO_NUM_NC,
-        .d5    = GPIO_NUM_NC,
-        .d6    = GPIO_NUM_NC,
-        .d7    = GPIO_NUM_NC,
-        .gpio_cd = GPIO_NUM_NC,
-        .gpio_wp = GPIO_NUM_NC,
-        .width = 1,
-        .flags = SDMMC_SLOT_FLAG_INTERNAL_PULLUP,
-    };
+    sdmmc_card_t *card = sdcard_get_card();
+    if (!card) {
+        ESP_LOGE(TAG, "无法获取 SD 卡指针");
+        return;
+    }
 
-    ESP_ERROR_CHECK(sdmmc_host_init());
-    ESP_ERROR_CHECK(sdmmc_host_init_slot(SDMMC_HOST_SLOT_1, &slot_config));
-
-    // 2. 初始化 SD 卡 (不挂载 FATFS, 直接暴露给 USB)
-    sdmmc_card_t *card = (sdmmc_card_t *)malloc(sizeof(sdmmc_card_t));
-    ESP_ERROR_CHECK(sdmmc_card_init(&host, card));
-    sdmmc_card_print_info(stdout, card);
-
-    // 3. 安装 TinyUSB 驱动
+    // 2. 安装 TinyUSB 驱动
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
     tusb_cfg.descriptor.device = NULL;
     tusb_cfg.descriptor.full_speed_config = NULL;
     tusb_cfg.descriptor.string = NULL;
     tusb_cfg.descriptor.string_count = 0;
 
-    esp_err_t ret = tinyusb_driver_install(&tusb_cfg);
+    ret = tinyusb_driver_install(&tusb_cfg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "TinyUSB 驱动安装失败: %s", esp_err_to_name(ret));
         return;
     }
 
-    // 4. 安装 MSC 驱动
+    // 3. 安装 MSC 驱动
     tinyusb_msc_driver_config_t driver_cfg = {
         .user_flags = { .auto_mount_off = 0 },
         .callback = NULL,
@@ -65,7 +47,7 @@ void usb_msc_init(void) {
         return;
     }
 
-    // 5. 创建 SDMMC 存储并暴露给 USB
+    // 4. 创建 SDMMC 存储并暴露给 USB
     tinyusb_msc_storage_config_t msc_cfg = {
         .medium.card = card,
         .mount_point = TINYUSB_MSC_STORAGE_MOUNT_USB,

@@ -1501,14 +1501,13 @@ static esp_err_t catchall_handler(httpd_req_t *req, httpd_err_code_t err) {
     }
 
     // 构造 SD 卡文件路径
-    char full_path[128];
-    snprintf(full_path, sizeof(full_path), "%s/tiles/%u/%u/%u.png",
-             SD_MOUNT_POINT, z, x, y);
+    char sd_path[64];
+    snprintf(sd_path, sizeof(sd_path), "/tiles/%u/%u/%u.png", z, x, y);
 
     // 打开文件 (ADC 可能抢占 SPI, 重试)
     FILE *f = NULL;
     for (int attempt = 0; attempt < TILE_OPEN_RETRY_MAX; attempt++) {
-        f = fopen(full_path, "rb");
+        f = sdcard_fopen(sd_path);
         if (f) break;
         vTaskDelay(pdMS_TO_TICKS(10));
     }
