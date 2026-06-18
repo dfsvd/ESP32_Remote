@@ -1,9 +1,6 @@
 #include "rc_sdcard.h"
-#include "rc_sdcard.h"
 #include "esp_log.h"
-#include "driver/spi_master.h"
-#include "driver/gpio.h"
-#include "driver/sdspi_host.h"
+#include "driver/sdmmc_host.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 #include <string.h>
@@ -16,33 +13,41 @@ static sdmmc_card_t *s_card = NULL;
 esp_err_t sdcard_mount(void) {
     if (s_mounted) return ESP_OK;
 
-    // 配置 SPI 总线
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = SD_SPI_MOSI,
-        .miso_io_num = SD_SPI_MISO,
-        .sclk_io_num = SD_SPI_SCLK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4000,
+    // SDMMC 宿主机配置 (Slot 1 = GPIO 矩阵, 引脚可自定义)
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.slot = SDMMC_HOST_SLOT_1;
+
+    // 引脚配置并通过 GPIO 矩阵映射到自定义引脚
+    sdmmc_slot_config_t slot_config = {
+        .clk   = SDMMC_CLK,      // 47
+        .cmd   = SDMMC_CMD,      // 48
+        .d0    = SDMMC_D0,       // 21
+        .d1    = GPIO_NUM_NC,
+        .d2    = GPIO_NUM_NC,
+        .d3    = GPIO_NUM_NC,
+        .d4    = GPIO_NUM_NC,
+        .d5    = GPIO_NUM_NC,
+        .d6    = GPIO_NUM_NC,
+        .d7    = GPIO_NUM_NC,
+        .gpio_cd = GPIO_NUM_NC,
+        .gpio_wp = GPIO_NUM_NC,
+        .width = 1,                     // 1-bit mode
+        .flags = SDMMC_SLOT_FLAG_INTERNAL_PULLUP,
     };
 
-    esp_err_t ret = spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
+    // 初始化 SDMMC 外设
+    esp_err_t ret = sdmmc_host_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "SPI 总线初始化失败: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "SDMMC 宿主机初始化失败: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    // SD 卡 SPI 设备配置
-    sdspi_device_config_t slot_cfg = {
-        .host_id   = SPI2_HOST,
-        .gpio_cs   = SD_SPI_CS,
-        .gpio_cd   = SDSPI_SLOT_NO_CD,
-        .gpio_wp   = SDSPI_SLOT_NO_WP,
-        .gpio_int  = GPIO_NUM_NC,
-        .gpio_wp_polarity = 0,
-        .duty_cycle_pos = 0,
-        .wait_for_miso = 0,
-    };
+    ret = sdmmc_host_init_slot(SDMMC_HOST_SLOT_1, &slot_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SDMMC 卡槽初始化失败: %s", esp_err_to_name(ret));
+        sdmmc_host_deinit();
+        return ret;
+    }
 
     // 挂载 FATFS
     esp_vfs_fat_mount_config_t mount_cfg = {
@@ -51,24 +56,23 @@ esp_err_t sdcard_mount(void) {
         .allocation_unit_size = 16 * 1024,
     };
 
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    ret = esp_vfs_fat_sdspi_mount(SD_MOUNT_POINT, &host, &slot_cfg, &mount_cfg, &s_card);
+    ret = esp_vfs_fat_sdmmc_mount(SD_MOUNT_POINT, &host, &slot_config, &mount_cfg, &s_card);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "TF 卡挂载失败: %s (可能无卡或未格式化)", esp_err_to_name(ret));
-        spi_bus_free(SPI2_HOST);
+        sdmmc_host_deinit();
         return ret;
     }
 
     s_mounted = true;
     sdmmc_card_print_info(stdout, s_card);
-    ESP_LOGI(TAG, "TF 卡已挂载到 %s", SD_MOUNT_POINT);
+    ESP_LOGI(TAG, "TF 卡已挂载到 %s (SDMMC 1-bit)", SD_MOUNT_POINT);
     return ESP_OK;
 }
 
 void sdcard_unmount(void) {
     if (!s_mounted) return;
     esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT, s_card);
-    spi_bus_free(SPI2_HOST);
+    sdmmc_host_deinit();
     s_mounted = false;
     s_card = NULL;
     ESP_LOGI(TAG, "TF 卡已卸载");

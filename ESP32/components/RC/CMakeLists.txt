@@ -14,7 +14,7 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "${tinyusb_src_dir}/src"
     EMBED_TXTFILES "src/index.html"
     EMBED_FILES ${RC_AUDIO_FILES}
-    REQUIRES espressif__esp_tinyusb esp_adc esp_wifi esp_http_server nvs_flash esp_netif esp_event esp_driver_gpio esp_driver_uart esp_driver_i2s bt led_strip usb
+    REQUIRES espressif__esp_tinyusb esp_adc esp_wifi esp_http_server nvs_flash esp_netif esp_event esp_driver_gpio esp_driver_uart esp_driver_i2s esp_driver_sdmmc bt led_strip usb
 )
 
 # TinyUSB Host 编译定义

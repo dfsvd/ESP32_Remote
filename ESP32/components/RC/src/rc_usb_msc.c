@@ -4,38 +4,38 @@
 #include "tinyusb_default_config.h"
 #include "tinyusb_msc.h"
 #include "sdmmc_cmd.h"
-#include "driver/sdspi_host.h"
-#include "driver/spi_master.h"
+#include "driver/sdmmc_host.h"
 
 static const char *TAG = "USB_MSC";
 
 void usb_msc_init(void) {
-    ESP_LOGI(TAG, "初始化 USB MSC (TF卡 → U盘)...");
+    ESP_LOGI(TAG, "初始化 USB MSC (TF卡 → U盘, SDMMC 1-bit)...");
 
-    // 1. 初始化 SPI 总线
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = SD_SPI_MOSI,
-        .miso_io_num = SD_SPI_MISO,
-        .sclk_io_num = SD_SPI_SCLK,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4000,
+    // 1. 初始化 SDMMC 宿主机 + 卡槽
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.slot = SDMMC_HOST_SLOT_1;
+
+    sdmmc_slot_config_t slot_config = {
+        .clk   = SDMMC_CLK,      // 47
+        .cmd   = SDMMC_CMD,      // 48
+        .d0    = SDMMC_D0,       // 21
+        .d1    = GPIO_NUM_NC,
+        .d2    = GPIO_NUM_NC,
+        .d3    = GPIO_NUM_NC,
+        .d4    = GPIO_NUM_NC,
+        .d5    = GPIO_NUM_NC,
+        .d6    = GPIO_NUM_NC,
+        .d7    = GPIO_NUM_NC,
+        .gpio_cd = GPIO_NUM_NC,
+        .gpio_wp = GPIO_NUM_NC,
+        .width = 1,
+        .flags = SDMMC_SLOT_FLAG_INTERNAL_PULLUP,
     };
-    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO));
 
-    // 2. 初始化 SD 卡 (不挂载 FATFS)
-    sdspi_device_config_t slot_cfg = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_cfg.host_id = SPI2_HOST;
-    slot_cfg.gpio_cs = SD_SPI_CS;
-    slot_cfg.gpio_cd = SDSPI_SLOT_NO_CD;
-    slot_cfg.gpio_wp = SDSPI_SLOT_NO_WP;
+    ESP_ERROR_CHECK(sdmmc_host_init());
+    ESP_ERROR_CHECK(sdmmc_host_init_slot(SDMMC_HOST_SLOT_1, &slot_config));
 
-    sdspi_dev_handle_t sd_handle;
-    ESP_ERROR_CHECK(sdspi_host_init_device(&slot_cfg, &sd_handle));
-
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = sd_handle;
-
+    // 2. 初始化 SD 卡 (不挂载 FATFS, 直接暴露给 USB)
     sdmmc_card_t *card = (sdmmc_card_t *)malloc(sizeof(sdmmc_card_t));
     ESP_ERROR_CHECK(sdmmc_card_init(&host, card));
     sdmmc_card_print_info(stdout, card);

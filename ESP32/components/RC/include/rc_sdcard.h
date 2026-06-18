@@ -6,11 +6,10 @@
 #include "esp_err.h"
 #include "sdmmc_cmd.h"
 
-// ========== SPI 引脚配置 (正点原子 ESP32-S3 开发板) ==========
-#define SD_SPI_MOSI    GPIO_NUM_11
-#define SD_SPI_MISO    GPIO_NUM_13
-#define SD_SPI_SCLK    GPIO_NUM_12
-#define SD_SPI_CS      GPIO_NUM_2
+// ========== SDMMC 1-bit 引脚配置 (ESP32-S3 GPIO 矩阵) ==========
+#define SDMMC_CLK    GPIO_NUM_47   // SD_CLK  (SPICLK_P)
+#define SDMMC_CMD    GPIO_NUM_48   // SD_CMD  (SPICLK_N)
+#define SDMMC_D0     GPIO_NUM_21   // SD_DAT0
 
 // SD 卡挂载点
 #define SD_MOUNT_POINT "/sd"
