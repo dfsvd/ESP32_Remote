@@ -134,4 +134,3 @@ tileLayer = L.tileLayer('http://192.168.4.1/tiles/{z}/{x}/{y}.png', {
 | `ESP32/components/RC/include/rc_sdcard.h` | SDMMC 引脚定义 (`SDMMC_CLK=47` 等) + API 声明 |
 | `web/src/components/MapPanel.vue` | Leaflet 地图组件 |
 | `web/src/composables/useRCState.js` | 模拟 GPS 数据生成 |
-| `ESP32/tools/download_tiles.py` | 在线瓦片下载工具 (已由 SASPlanet 替代) |
