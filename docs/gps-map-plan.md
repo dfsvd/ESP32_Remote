@@ -32,7 +32,7 @@ SD卡 SASPlanet TMS 瓦片 ← HTTP chunked ← ESP32 catchall_handler
 | 地图面板 | `MapPanel.vue` | Leaflet 地图容器、飞机标记、轨迹、自动跟随 |
 | 模拟 GPS | `useRCState.js` | `?mock=true` 激活，在深圳绕 8 字飞行 |
 | 瓦片服务 | `rc_wf.c` | catchall_handler chunked 流式发送 |
-| SD 卡驱动 | `rc_sdcard.c` | SPI+FATFS 挂载 TF 卡 |
+| SD 卡驱动 | `rc_sdcard.c` | SDMMC 1-bit + FATFS 挂载 TF 卡 |
 | 遥测推送 | `rc_wf.c` | WebSocket 广播 CRSF 遥测数据 |
 
 ### 离线瓦片服务
@@ -75,7 +75,7 @@ SD卡 SASPlanet TMS 瓦片 ← HTTP chunked ← ESP32 catchall_handler
 
 | 步骤 | 详情 |
 |------|------|
-| SD 卡 | SPI 模式 (MOSI=11, MISO=13, SCLK=12, CS=2) |
+| SD 卡 | SDMMC 1-bit (CLK=47, CMD=48, D0=21) |
 | 文件系统 | FATFS, 挂载点 `/sd` |
 | 瓦片路径 | `/tiles/{z}/{x}/{y}.png` |
 | HTTP 服务 | catchall_handler (404 error handler) |

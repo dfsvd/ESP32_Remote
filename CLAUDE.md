@@ -86,7 +86,7 @@ All source is in `ESP32/components/RC/`. Modules communicate through a shared `f
 
 - **rc_wf** — WiFi AP + HTTP server + WebSocket server. Serves the embedded `index.html`, streams channel data, receives calibration/CRSF/LED commands. **Tile serving**: `catchall_handler` intercepts 404 → reads SD card tiles via chunked HTTP (`malloc(4KB)` + `httpd_resp_send_chunk`). Keep-Alive enabled. Server pinned to Core 0.
 
-- **rc_sdcard** (`include/rc_sdcard.h`, `src/rc_sdcard.c`) — SD/MMC card via SPI (MOSI=11, MISO=13, SCLK=12, CS=2) on SPI2_HOST. FATFS mount at `/sd`. Provides `sdcard_mount()`, `sdcard_read_file()`, `sdcard_file_exists()`. Used for offline map tiles and USB MSC mass storage.
+- **rc_sdcard** (`include/rc_sdcard.h`, `src/rc_sdcard.c`) — SD/MMC card via **SDMMC 1-bit** (CLK=47, CMD=48, D0=21) on SDMMC_SLOT_1. FATFS mount at `/sd`. Provides `sdcard_mount()`, `sdcard_fopen()` (流式), `sdcard_read_file()` (64KB 上限), `sdcard_file_exists()`. **单入口封装** — 上层代码不直接调用 FATFS/SDMMC 底层 API。
 
 - **rc_bridge** — BLE NUS ↔ (CRSF MSP | USB CDC) bidirectional bridge. Used in passthrough mode for flight controller configuration via MSP protocol.
 
