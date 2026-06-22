@@ -48,6 +48,8 @@ typedef enum {
     SOUND_BINDING,   // 正在连接接收机
     SOUND_BINDFAIL,  // 连接失败
     SOUND_LOCKED,    // 已锁定
+    SOUND_MSCMOD,    // U盘模式
+    SOUND_PASMOD,    // 透穿调参模式
     SOUND_COUNT,
 } sound_id_t;
 

@@ -23,6 +23,8 @@ btdcn.wav,蓝牙断开,Bluetooth disconnected
 xboxmod.wav,xbox 模式,Xbox mode
 fpvmod.wav,fpv 模式,FPV mode
 rfmod.wav,射频模式,RF mode
+mscmod.wav,U盘模式,USB Mass Storage
+pasmod.wav,透穿调参模式,Passthrough mode
 binding.wav,正在连接接收机,Binding receiver
 bindfail.wav,连接失败,Binding failed
 lock.wav,已锁定,Locked
