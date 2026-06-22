@@ -1,6 +1,3 @@
-# 收集音频文件嵌入固件
-file(GLOB RC_AUDIO_FILES ${CMAKE_CURRENT_LIST_DIR}/../../audio/*.wav)
-
 # TinyUSB managed component 路径
 set(tinyusb_src_dir "${CMAKE_CURRENT_LIST_DIR}/../../managed_components/espressif__tinyusb")
 
@@ -13,7 +10,6 @@ idf_component_register(
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "${tinyusb_src_dir}/src"
     EMBED_TXTFILES "src/index.html"
-    EMBED_FILES ${RC_AUDIO_FILES}
     REQUIRES espressif__esp_tinyusb esp_adc esp_wifi esp_http_server nvs_flash esp_netif esp_event esp_driver_gpio esp_driver_uart esp_driver_i2s esp_driver_sdmmc bt led_strip usb
 )
 

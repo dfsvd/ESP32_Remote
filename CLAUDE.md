@@ -44,6 +44,17 @@ cd ESP32/tools/audio_gen
 python tts_gen.py         # Uses edge-tts to batch-generate WAV files from audio_list.csv
 ```
 
+**Deploy to TF card:** Copy generated WAV files to TF card root's `audio/` directory:
+```
+TF卡根目录/
+└── audio/
+    ├── hello.wav
+    ├── armed.wav
+    ├── btcon.wav
+    ... (28 files)
+```
+Audio is no longer embedded in firmware — all WAV files are streamed from TF card via SDMMC.
+
 ### MSP Capture Utility
 ```bash
 python tools/capture_msp.py  # Capture Betaflight MSP communication for debugging
@@ -92,13 +103,13 @@ All source is in `ESP32/components/RC/`. Modules communicate through a shared `f
 
 - **rc_usb_host** — USB Host CDC ACM for connecting to flight controllers (Betaflight/INAV). Handles hot-plug, bus bounce reset, ring buffer read/write.
 
-- **rc_audio** — I2S + MAX98357A audio player. 28 sound effects (WAV), 4 priority levels (CRITICAL > HIGH > NORMAL > LOW), background task-driven non-blocking playback, blocking `audio_play_wait()` for boot-time announcements.
+- **rc_audio** — I2S + MAX98357A audio player. 28 sound effects (WAV) streamed from TF card `/sd/audio/*.wav`. Ping-pong double buffering (2×2048B preloaded to DMA). 4 priority levels (CRITICAL > HIGH > NORMAL > LOW), background task-driven non-blocking playback, blocking `audio_play_wait()` for boot-time announcements. 10s playback watchdog.
 
 - **rc_led** — WS2812 addressable LED controller. 7 mode presets (OFF, CRSF_RF→red, BLE→blue, USB_HID→cyan, USB_XBOX→lime, WIFI→green, BIND→yellow fast blink). 4 effects (solid, blink, breath, rainbow). Runtime reconfigurable via Web UI.
 
 ### Main Loop (`main/main.c`)
 
-Startup sequence: NVS init → load settings → GPIO config → audio init → start ADC task → LED init → detect boot mode → init selected modules → while(1): BLE update, LED poll, CRSF sync + auto-bind FSM + RSSI alerts + switch edge detection, USB HID send.
+Startup sequence: NVS init → load settings → GPIO config → audio init → start ADC task → LED init → SD card mount (SDMMC) → detect boot mode → init selected modules → while(1): BLE update, LED poll, CRSF sync + auto-bind FSM + RSSI alerts + switch edge detection, USB HID send.
 
 The main loop handles:
 - **Link state tracking** — voice alerts on link up/down (`SOUND_TELEMOK`/`SOUND_TELEMKO`)
@@ -118,7 +129,11 @@ ADC (20kHz) → fpv_joystick_report_t {roll, pitch, throttle, yaw,
               ├─ CRSF RF → sync_joy_to_crsf(&joy) [16 channels]
               ├─ WiFi WS → rc_wf broadcasts CSV to web clients
               ├─ SD Card → catchall_handler serves tiles via HTTP chunked
-              └─ Bridge  → BLE NUS ↔ USB CDC or CRSF MSP
+              ├─ Bridge  → BLE NUS ↔ USB CDC or CRSF MSP
+              └─ Audio   → audio_play() → queue → audio_task
+                            → sdcard_fopen("/audio/<name>.wav")
+                            → fread(chunks) → mono→stereo (ping-pong)
+                            → i2s_channel_write() → MAX98357A
 ```
 
 ## Web Frontend Architecture
@@ -177,7 +192,8 @@ components_en/          — English UI components (imported into Main_en.vue)
 - `ESP32/dependencies.lock` — esp_tinyusb 2.1.1, led_strip 3.0.3, tinyusb 0.19.0~3
 - `ESP32/components/RC/include/rc_crsf.h` — CRSF link mode (half/full duplex) and UART pins
 - `ESP32/components/RC/include/rc_read.h` — ADC channels, switch GPIO pins, calibration structs, config blob (channel mapping, EPA, REV, profiles)
-- `ESP32/components/RC/include/rc_sdcard.h` — SD card SPI pins (MOSI=11, MISO=13, SCLK=12, CS=2) and FATFS mount point
+- `ESP32/components/RC/include/rc_sdcard.h` — SDMMC 1-bit pins (CLK=47, CMD=48, D0=21), FATFS mount point `/sd`
+- `ESP32/components/RC/include/rc_audio.h` — `sound_id_t` enum (28 sounds), priority levels, I2S pin config, public API
 
 ## Reference Docs
 

@@ -18,6 +18,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "rc_audio.h"
+#include "rc_sdcard.h"
 #include "rc_ble.h"
 #include "rc_bridge.h"
 #include "rc_crsf.h"
@@ -462,12 +463,12 @@ static boot_mode_t detect_boot_mode(void) {
                 }
                 if (roll > BOOT_STICK_RIGHT_THRESH) {
                     ESP_LOGI(TAG, ">> 右摇杆右 → 进入 USB U盘模式");
-                    audio_play_wait(SOUND_USBMOD, 5000);
+                    audio_play_wait(SOUND_MSCMOD, 5000);
                     return BOOT_MODE_USB_MSC;
                 }
                 if (roll < BOOT_STICK_LEFT_THRESH) {
                     ESP_LOGI(TAG, ">> 右摇杆左 → 进入透穿调参模式");
-                    audio_play_wait(SOUND_WIFIMD, 5000);
+                    audio_play_wait(SOUND_PASMOD, 5000);
                     return BOOT_MODE_PASSTHROUGH;
                 }
                 vTaskDelay(pdMS_TO_TICKS(100));
@@ -596,9 +597,8 @@ void app_main(void) {
     };
     ESP_ERROR_CHECK(gpio_config(&mode_select_config));
 
-    /* ---- 3.5 音频播放器初始化 + 开机提示音 ---- */
+    /* ---- 3.5 音频播放器初始化 ---- */
     audio_init(NULL, 0); // 默认 I2S 引脚 + 16kHz
-    audio_play(SOUND_HELLO);
 
     /* ---- 4. 启动 ADC (摇杆读取) — 需在 boot 检测之前 ---- */
     xTaskCreatePinnedToCore(ADC_TASK, "adc_task", 4096, &joy, 4, NULL, 1);
@@ -606,6 +606,15 @@ void app_main(void) {
 
     /* ---- 5. LED 初始化 ---- */
     led_init();
+
+    /* ---- 5.5 挂载 TF 卡 (音频/瓦片地图)
+     * 放在 LED init 之后是因为 SDMMC_CMD 与 WS2812 共用 GPIO48,
+     * SDMMC 通过 IOMUX 连接, 会覆盖 GPIO 矩阵.
+     * LED 显示最后设置的颜色不变, 闪烁/呼吸/彩虹效果停用. ---- */
+    sdcard_mount();
+
+    /* ---- 5.6 开机提示音 — 放在 SD 卡挂载之后, 确保能找到文件 ---- */
+    audio_play(SOUND_HELLO);
 
     /* ---- 6. 检测开机模式 ---- */
     boot_mode_t mode = detect_boot_mode();
@@ -700,7 +709,6 @@ void app_main(void) {
         break;
     case BOOT_MODE_PASSTHROUGH:
         led_set_mode(LED_MODE_BLE);
-        audio_play(SOUND_WIFIMD);
         break;
     case BOOT_MODE_RF:
     default:

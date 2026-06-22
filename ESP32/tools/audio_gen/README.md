@@ -1,6 +1,6 @@
 # audio_gen — 手柄提示音语音生成工具
 
-生成中文/英文 WAV 提示音，直接输出到 `ESP32/audio/` 供固件编译使用。
+生成中文/英文 WAV 提示音，输出到 `ESP32/audio/`。生成的 WAV **不再编译进固件**，需部署到 TF 卡 `/audio/` 目录流式读取。
 
 ## 目录结构
 
@@ -58,17 +58,35 @@ btmod.wav,蓝牙模式,Bluetooth mode
 
 | 文件 | 作用 |
 |------|------|
-| `audio/*.wav` | 通过 RC 组件 `CMakeLists.txt` 的 `EMBED_FILES` 编译进固件 |
-| `components/RC/src/rc_audio.c` | `SOUND_DECL(xxx)` 和 `s_sounds[]` 查找表映射文件名 → 枚举 |
+| `audio/*.wav` | 源码参考，需部署到 TF 卡 `/audio/` 目录（不再嵌入固件） |
+| `components/RC/src/rc_audio.c` | `s_names[]` 文件名表 → 构造 `/audio/<name>.wav` 路径，SD 卡流式读取 |
 | `components/RC/include/rc_audio.h` | `sound_id_t` 枚举定义，与 CSV 中的 `filename` 一一对应 |
+
+## 部署到 TF 卡
+
+生成 WAV 后，将 `ESP32/audio/` 目录全部复制到 TF 卡根目录：
+
+```
+TF卡根目录/
+└── audio/
+    ├── hello.wav
+    ├── armed.wav
+    ├── btcon.wav
+    ├── btdcn.wav
+    ... (28 files)
+```
+
+固件启动后自动挂载 SD 卡，播放时通过 `sdcard_fopen()` 流式读取，ping-pong 双缓冲写入 I2S DMA。
 
 **添加新语音步骤：**
 
 1. 在 `audio_list.csv` 添加一行
 2. 运行 `python tools/audio_gen/tts_gen.py` 生成 WAV
 3. 在 `rc_audio.h` 的 `sound_id_t` 添加枚举值
-4. 在 `rc_audio.c` 添加 `SOUND_DECL` + `SOUND_ENTRY`
-5. 在 `main.c` 或其他地方调用 `audio_play()` 触发
+4. 在 `rc_audio.c` 的 `s_names[]` / `s_names_cn[]` 添加名称条目
+5. 如需默认优先级，在 `s_priorities[]` 添加
+6. 在 `main.c` 或其他地方调用 `audio_play()` 触发
+7. 将新 WAV 复制到 TF 卡 `/audio/` 目录
 
 ## 参数调整
 

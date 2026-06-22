@@ -19,3 +19,6 @@ web/node_modules/
 Thumbs.db
 compile_commands.json
 hello_world/
+
+# Audio WAV files — stored on TF card, not embedded in firmware
+ESP32/audio/

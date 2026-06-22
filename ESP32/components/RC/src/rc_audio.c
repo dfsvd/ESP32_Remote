@@ -6,15 +6,18 @@
  *   - MAX98357A I2S 功放 (BCLK=19, LRC=20, DIN=37)
  *   - I2S 标准 Philips 立体声模式 (MAX98357A 要求)
  *   - 16bit/16000Hz/mono PCM WAV 输入 → 立体声输出
+ *   - TF 卡 /sd/audio/ 目录 WAV 文件流式读取
  *
  * 播放模型:
  *   - 后台 FreeRTOS 任务 + 队列 (深度 4)
  *   - 非阻塞: audio_play() 立即返回
  *   - 打断: 高优先级请求可中断当前播放
  *   - 丢弃: 队列满时新请求被丢弃
+ *   - I2S DMA ping-pong 双缓冲: 预加载两帧后使能, 消除帧间隙
  */
 
 #include "rc_audio.h"
+#include "rc_sdcard.h"
 #include "driver/i2s_std.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -38,7 +41,7 @@ static const char *TAG = "audio_player";
  * 缓冲区
  * ================================================================ */
 #define MONO_BUF_SZ 1024                // 单声道输入块大小
-#define STEREO_BUF_SZ (MONO_BUF_SZ * 2) // 立体声输出块大小
+#define STEREO_BUF_SZ (MONO_BUF_SZ * 2) // 单帧立体声输出块大小
 #define PLAY_QUEUE_LEN 4                // 播放队列深度
 #define AUDIO_TASK_STACK 4096
 #define AUDIO_TASK_PRIO 5
@@ -67,7 +70,7 @@ typedef struct {
 
 /*
  * 在 WAV 文件中搜索 "data" chunk
- * 返回 data 开始位置 (相对于 start) 和 data size
+ * 返回 data chunk 内的 payload 偏移及大小
  * 失败返回 0
  */
 static size_t wav_find_data(const uint8_t *start, const uint8_t *end,
@@ -78,7 +81,7 @@ static size_t wav_find_data(const uint8_t *start, const uint8_t *end,
             *data_ptr = p + 8;
             *data_size = (uint32_t)p[4] | ((uint32_t)p[5] << 8) |
                          ((uint32_t)p[6] << 16) | ((uint32_t)p[7] << 24);
-            return (size_t)(p - start); // header 结束偏移 (data chunk 之后)
+            return (size_t)(p - start); // "data" 标识位置偏移
         }
         /* 跳过当前 chunk: 4字节ID + 4字节size + payload */
         uint32_t chunk_size = (uint32_t)p[4] | ((uint32_t)p[5] << 8) |
@@ -87,90 +90,6 @@ static size_t wav_find_data(const uint8_t *start, const uint8_t *end,
     }
     return 0; // 未找到
 }
-
-/* ================================================================
- * 嵌入的音频数据 —— 符号声明
- * 说明：ESP-IDF 的 EMBED_FILES 根据文件 NAME 生成符号，
- *       audio/armed.wav → _binary_armed_wav_start/end
- *       MAKE_C_IDENTIFIER 将 '.' 替换为 '_'
- * ================================================================ */
-#define SOUND_DECL(name)                                                       \
-    extern const uint8_t _binary_##name##_wav_start[];                         \
-    extern const uint8_t _binary_##name##_wav_end[]
-
-SOUND_DECL(hello);
-SOUND_DECL(armed);
-SOUND_DECL(modesw);
-SOUND_DECL(fpvmod);
-SOUND_DECL(btmod);
-SOUND_DECL(wifimd);
-SOUND_DECL(usbmod);
-SOUND_DECL(xboxmod);
-SOUND_DECL(wificon);
-SOUND_DECL(wifidcn);
-SOUND_DECL(btcon);
-SOUND_DECL(btdcn);
-SOUND_DECL(lowbatt);
-SOUND_DECL(lowbat);
-SOUND_DECL(rssi_org);
-SOUND_DECL(rssi_red);
-SOUND_DECL(telemok);
-SOUND_DECL(telemko);
-SOUND_DECL(sensorko);
-SOUND_DECL(modelpwr);
-SOUND_DECL(thralert);
-SOUND_DECL(swalert);
-SOUND_DECL(inactiv);
-SOUND_DECL(rfmod);
-SOUND_DECL(binding);
-SOUND_DECL(bindfail);
-SOUND_DECL(lock);
-/* ================================================================
- * 音频数据查找表
- * ================================================================ */
-typedef struct {
-    const uint8_t *start;
-    const uint8_t *end;
-} sound_data_t;
-
-/* 格式: SOUND_ENTRY(枚举名, 小写文件名) */
-#define SOUND_ENTRY(en, fn)                                                    \
-    [en] = {                                                                   \
-        .start = _binary_##fn##_wav_start,                                     \
-        .end = _binary_##fn##_wav_end,                                         \
-    }
-
-static const sound_data_t s_sounds[SOUND_COUNT] = {
-    SOUND_ENTRY(SOUND_HELLO, hello),
-    SOUND_ENTRY(SOUND_ARMED, armed),
-    SOUND_ENTRY(SOUND_MODESW, modesw),
-    SOUND_ENTRY(SOUND_FPVMOD, fpvmod),
-    SOUND_ENTRY(SOUND_BTMOD, btmod),
-    SOUND_ENTRY(SOUND_WIFIMD, wifimd),
-    SOUND_ENTRY(SOUND_USBMOD, usbmod),
-    SOUND_ENTRY(SOUND_XBOXMOD, xboxmod),
-    SOUND_ENTRY(SOUND_WIFICON, wificon),
-    SOUND_ENTRY(SOUND_WIFIDCN, wifidcn),
-    SOUND_ENTRY(SOUND_BTCON, btcon),
-    SOUND_ENTRY(SOUND_BTDCN, btdcn),
-    SOUND_ENTRY(SOUND_LOWBATT, lowbatt),
-    SOUND_ENTRY(SOUND_LOWBAT, lowbat),
-    SOUND_ENTRY(SOUND_RSSI_ORG, rssi_org),
-    SOUND_ENTRY(SOUND_RSSI_RED, rssi_red),
-    SOUND_ENTRY(SOUND_TELEMOK, telemok),
-    SOUND_ENTRY(SOUND_TELEMKO, telemko),
-    SOUND_ENTRY(SOUND_SENSORKO, sensorko),
-    SOUND_ENTRY(SOUND_MODELPWR, modelpwr),
-    SOUND_ENTRY(SOUND_THRALERT, thralert),
-    SOUND_ENTRY(SOUND_SWALERT, swalert),
-    SOUND_ENTRY(SOUND_INACTIV, inactiv),
-    SOUND_ENTRY(SOUND_RFMOD, rfmod),
-    SOUND_ENTRY(SOUND_BINDING, binding),
-    SOUND_ENTRY(SOUND_BINDFAIL, bindfail),
-    SOUND_ENTRY(SOUND_LOCKED, lock),
-};
-
-#undef SOUND_ENTRY
 
 /* ================================================================
  * 每个提示音的默认优先级
@@ -207,7 +126,8 @@ static const char *s_names[] = {
     [SOUND_THRALERT] = "thralert", [SOUND_SWALERT] = "swalert",
     [SOUND_INACTIV] = "inactiv",   [SOUND_RFMOD] = "rfmod",
     [SOUND_BINDING] = "binding",   [SOUND_BINDFAIL] = "bindfail",
-    [SOUND_LOCKED] = "lock",
+    [SOUND_LOCKED] = "lock",       [SOUND_MSCMOD] = "mscmod",
+    [SOUND_PASMOD] = "pasmod",
 };
 
 static const char *s_names_cn[] = {
@@ -238,6 +158,8 @@ static const char *s_names_cn[] = {
     [SOUND_BINDING] = "正在连接接收机",
     [SOUND_BINDFAIL] = "连接失败",
     [SOUND_LOCKED] = "已锁定",
+    [SOUND_MSCMOD] = "U盘模式",
+    [SOUND_PASMOD] = "透穿调参模式",
 };
 
 /* ================================================================
@@ -255,17 +177,27 @@ static volatile bool s_playing = false;
 static volatile bool s_stop_req = false;
 static SemaphoreHandle_t s_play_done = NULL; /* 同步信号量: audio_play_wait */
 
-/* 静态缓冲区 — BSS 段, 不占栈 */
-static uint8_t s_stereo_buf[STEREO_BUF_SZ];
+/*
+ * 双缓冲 (ping-pong) 缓冲区 — BSS 段, 不占栈
+ *
+ *   s_audio_buf[0]: ping 帧 (2048 字节 = 1024 samples × 16bit × 2ch)
+ *   s_audio_buf[1]: pong 帧 (同上)
+ *   启动前预加载两帧到 DMA → I2S enable → 交替填充 buf_idx ^= 1
+ */
+static uint8_t s_audio_buf[2][STEREO_BUF_SZ]; /* 2 × 2048 B */
+
+/* 单声道读取缓冲区: 每次从 SD 卡读 1024 字节 PCM */
+static uint8_t s_mono_buf[MONO_BUF_SZ];
 
 /* ================================================================
  * mono → stereo 转换 + 增益 + 硬限幅
  * 输入:  [S0l,S0h, S1l,S1h, ...]  (16bit mono PCM)
  * 输出:  [S0l,S0h, S0l,S0h, S1l,S1h, S1l,S1h, ...] (16bit stereo)
  * gain:  100=原始, 150=+3.5dB, 200=+6dB
+ * out_buf: 输出目标缓冲区 (必须 ≥ mono_len × 2 字节)
  * ================================================================ */
 static size_t mono_to_stereo(const uint8_t *mono, size_t mono_len,
-                             uint8_t gain_pct) {
+                             uint8_t gain_pct, uint8_t *out_buf) {
     size_t samples = mono_len / 2;
     size_t out_len = samples * 4;
 
@@ -275,7 +207,7 @@ static size_t mono_to_stereo(const uint8_t *mono, size_t mono_len,
     }
 
     const int16_t *in = (const int16_t *)mono;
-    int16_t *out = (int16_t *)s_stereo_buf;
+    int16_t *out = (int16_t *)out_buf;
 
     for (size_t i = 0; i < samples; i++) {
         int32_t s = (int32_t)in[i] * gain_pct / 100;
@@ -293,61 +225,104 @@ static size_t mono_to_stereo(const uint8_t *mono, size_t mono_len,
 
 /* ================================================================
  * 播放一个提示音 (任务内调用)
+ *
+ * 数据来源: TF 卡 /sd/audio/<name>.wav
+ * 播放模型: ping-pong 双缓冲
+ *   1. sdcard_fopen 打开 WAV
+ *   2. fread 头 256B → 解析 RIFF + 搜索 data chunk
+ *   3. 预加载 ping/pong 两帧到 DMA (preload_data)
+ *   4. i2s_channel_enable → DMA 从 ping 开始播放
+ *   5. 主循环交替填充 pong/ping → i2s_channel_write
+ *   6. fclose + i2s_channel_disable
  * ================================================================ */
 static void audio_playback(play_request_t *req) {
-    const sound_data_t *sd = &s_sounds[req->id];
+    /* ── 1. 构建 SD 卡路径 ── */
+    char path[64];
+    snprintf(path, sizeof(path), "/audio/%s.wav", s_names[req->id]);
 
-    /* 校验 WAV */
-    if (sd->start[0] != 'R' || sd->start[1] != 'I' || sd->start[2] != 'F' ||
-        sd->start[3] != 'F') {
+    /* ── 2. 打开文件 ── */
+    FILE *f = sdcard_fopen(path);
+    if (!f) {
+        ESP_LOGW(TAG, "[%s] TF 卡文件未找到: %s", s_names[req->id], path);
+        return;
+    }
+
+    /* ── 3. 读取 WAV 头部 (256B 覆盖标准头 + LIST/INFO 扩展) ── */
+    uint8_t header[256];
+    size_t hdr_read = fread(header, 1, sizeof(header), f);
+    if (hdr_read < sizeof(wav_fmt_t)) {
+        ESP_LOGE(TAG, "[%s] WAV 头部读取失败", s_names[req->id]);
+        fclose(f);
+        return;
+    }
+
+    /* ── 4. 校验 RIFF ── */
+    if (header[0] != 'R' || header[1] != 'I' || header[2] != 'F' ||
+        header[3] != 'F') {
         ESP_LOGE(TAG, "[%s] 无效 WAV 文件", s_names[req->id]);
+        fclose(f);
         return;
     }
 
-    /* 搜索 data chunk (兼容 LIST/INFO 等扩展块) */
-    const uint8_t *mono_data = NULL;
+    /* ── 5. 搜索 data chunk ── */
+    const uint8_t *data_ptr = NULL;
     uint32_t data_size = 0;
-    size_t hdr_end = wav_find_data(sd->start, sd->end, &mono_data, &data_size);
-    if (!hdr_end || !mono_data || data_size == 0) {
+    size_t data_mark =
+        wav_find_data(header, header + hdr_read, &data_ptr, &data_size);
+    if (!data_mark || !data_ptr || data_size == 0) {
         ESP_LOGE(TAG, "[%s] 未找到 data chunk", s_names[req->id]);
+        fclose(f);
         return;
     }
 
-    const wav_fmt_t *fmt = (const wav_fmt_t *)sd->start;
-    size_t mono_total = data_size;
-    size_t mono_offset = 0;
-    float duration = (float)data_size / fmt->byte_rate;
-
-    // ESP_LOGI(TAG, "▶ %s (%s) prio=%d %.2fs", s_names[req->id],
-    //          s_names_cn[req->id], req->priority, duration);
+    /* ── 6. 定位到 data chunk 负载起始 ── */
+    size_t data_file_pos = (size_t)(data_ptr - header);
+    fseek(f, data_file_pos, SEEK_SET);
 
     s_playing = true;
     s_stop_req = false;
 
-    /* 预加载首批数据到 DMA */
-    size_t preload_src = (mono_total < MONO_BUF_SZ) ? mono_total : MONO_BUF_SZ;
-    if (preload_src > 0) {
-        size_t pre_stereo =
-            mono_to_stereo(mono_data, preload_src, VOLUME_GAIN_PCT);
+    size_t remaining = data_size;
+    int buf_idx = 0;       // 0=ping, 1=pong
+    bool i2s_active = false;
+
+    /* ── 7. Ping-pong 预加载: 填满 DMA TX FIFO 再启动 ── */
+    for (int pre = 0; pre < 2 && remaining > 0; pre++) {
+        size_t chunk = (remaining > MONO_BUF_SZ) ? MONO_BUF_SZ : remaining;
+        size_t actual = fread(s_mono_buf, 1, chunk, f);
+        if (actual == 0)
+            break;
+
+        size_t slen = mono_to_stereo(s_mono_buf, actual, VOLUME_GAIN_PCT,
+                                     s_audio_buf[pre]);
         size_t loaded = 0;
-        i2s_channel_preload_data(s_i2s_handle, s_stereo_buf, pre_stereo,
+        i2s_channel_preload_data(s_i2s_handle, s_audio_buf[pre], slen,
                                  &loaded);
+        remaining -= actual;
+        buf_idx = pre ^ 1;
     }
-    mono_offset = preload_src;
 
-    /* 启动 I2S 开始播放 */
-    ESP_ERROR_CHECK(i2s_channel_enable(s_i2s_handle));
+    /* ── 8. 启动 I2S — DMA 从预加载的两帧开始无间断播放 ── */
+    if (remaining < data_size) { // 至少预加载了数据
+        ESP_ERROR_CHECK(i2s_channel_enable(s_i2s_handle));
+        i2s_active = true;
+    }
 
-    /* ─── 主播放循环 ─── */
-    while (mono_offset < mono_total) {
-        /* 检查外部停止请求 */
+    /* ── 9. 主播放循环: 交替填充 ping/pong ── */
+    uint32_t play_start_ticks = xTaskGetTickCount();
+    while (remaining > 0) {
         if (s_stop_req) {
             ESP_LOGI(TAG, "■ %s — 外部停止", s_names[req->id]);
             goto done;
         }
 
-        /* 检查是否有更高优先级的请求待处理
-         * xQueuePeek 不消耗队列元素，只查看 */
+        /* 超时保护: 最长提示音 ~3s, 10s 未播完强制终止 */
+        if ((xTaskGetTickCount() - play_start_ticks) > pdMS_TO_TICKS(10000)) {
+            ESP_LOGE(TAG, "⚠ [%s] 播放超时 10s, 强制终止", s_names[req->id]);
+            goto done;
+        }
+
+        /* 检查更高优先级待处理请求 */
         play_request_t peek;
         if (xQueuePeek(s_queue, &peek, 0) == pdTRUE) {
             if (peek.priority > req->priority) {
@@ -357,27 +332,27 @@ static void audio_playback(play_request_t *req) {
             }
         }
 
-        /* 确定本次转换量 */
-        size_t mono_chunk = MONO_BUF_SZ;
-        if (mono_offset + mono_chunk > mono_total) {
-            mono_chunk = mono_total - mono_offset;
-        }
+        /* 从 SD 卡读下一块 */
+        size_t chunk = (remaining > MONO_BUF_SZ) ? MONO_BUF_SZ : remaining;
+        size_t actual = fread(s_mono_buf, 1, chunk, f);
+        if (actual == 0)
+            break;
 
-        /* mono → stereo */
-        size_t stereo_len = mono_to_stereo(mono_data + mono_offset, mono_chunk,
-                                           VOLUME_GAIN_PCT);
+        /* mono → stereo (写入当前 ping/pong 帧) */
+        size_t slen = mono_to_stereo(s_mono_buf, actual, VOLUME_GAIN_PCT,
+                                     s_audio_buf[buf_idx]);
 
-        /* 写入 I2S */
+        /* 写入 I2S — 阻塞直到 DMA 开始消费此帧 */
         size_t offset = 0;
-        while (offset < stereo_len) {
+        while (offset < slen) {
             if (s_stop_req)
                 goto done;
 
             size_t written = 0;
-            esp_err_t ret =
-                i2s_channel_write(s_i2s_handle, s_stereo_buf + offset,
-                                  stereo_len - offset, &written, portMAX_DELAY);
-
+            esp_err_t ret = i2s_channel_write(s_i2s_handle,
+                                              s_audio_buf[buf_idx] + offset,
+                                              slen - offset, &written,
+                                              portMAX_DELAY);
             if (ret != ESP_OK) {
                 ESP_LOGE(TAG, "I2S 写入失败: %s", esp_err_to_name(ret));
                 goto done;
@@ -385,20 +360,20 @@ static void audio_playback(play_request_t *req) {
             offset += written;
         }
 
-        mono_offset += mono_chunk;
+        remaining -= actual;
+        buf_idx ^= 1; // ping-pong 翻转
     }
 
-    /* 数据全部送入 DMA，等待排空 */
-    // ESP_LOGI(TAG, "□ %s — 播完", s_names[req->id]);
+    /* 数据全部送入 DMA, 等待排空 */
     vTaskDelay(pdMS_TO_TICKS(500));
 
 done:
-    /* 停止 I2S 防止 DMA 空转输出噪声 */
-    i2s_channel_disable(s_i2s_handle);
+    if (i2s_active) {
+        i2s_channel_disable(s_i2s_handle);
+    }
+    fclose(f);
     s_playing = false;
     s_stop_req = false;
-
-    /* 通知等待者 (如果有) */
     if (s_play_done) {
         xSemaphoreGive(s_play_done);
     }
@@ -437,9 +412,10 @@ void audio_init(const audio_pins_t *pins, uint32_t sample_rate) {
     ESP_LOGI(TAG, "初始化 I2S: BCLK=%d LRC=%d DOUT=%d SR=%" PRIu32, bclk, lrc,
              dout, rate);
 
-    /* ── I2S Channel ── */
+    /* ── I2S Channel (DMA 缓冲 16×64 帧 = 4KB, 容忍 SD 卡延迟) ── */
     i2s_chan_config_t chan_cfg =
         I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    chan_cfg.dma_desc_num = 16; // 8 → 16, 翻倍 DMA 缓冲深度
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &s_i2s_handle, NULL));
 
     /* ── I2S 标准立体声 (MAX98357A 要求) ── */
@@ -474,7 +450,7 @@ void audio_init(const audio_pins_t *pins, uint32_t sample_rate) {
                                  AUDIO_TASK_PRIO, &s_task);
     assert(ret == pdPASS);
 
-    ESP_LOGI(TAG, "音频播放器就绪");
+    ESP_LOGI(TAG, "音频播放器就绪 (TF 卡流式 + 双缓冲)");
 }
 
 void audio_play(sound_id_t id) { audio_play_prio(id, AUDIO_PRIO_NORMAL); }
